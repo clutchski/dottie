@@ -1,4 +1,4 @@
-.PHONY: build test lint fix install clean
+.PHONY: build test lint fix install uninstall clean
 
 # Build variables
 BINARY_NAME=dottie
@@ -27,9 +27,13 @@ lint:
 fix:
 	golangci-lint run --fix
 
-# Install to /usr/local/bin
-install: build
-	cp $(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
+# Install to $GOBIN (default: ~/go/bin)
+install:
+	go install $(LDFLAGS) $(BUILD_DIR)
+
+# Uninstall from $GOBIN
+uninstall:
+	rm -f $(shell go env GOBIN 2>/dev/null || echo "$(shell go env GOPATH)/bin")/$(BINARY_NAME)
 
 # Clean build artifacts
 clean:

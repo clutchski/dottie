@@ -4,10 +4,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/clutchski/dottie/internal/config"
 	"github.com/clutchski/dottie/internal/util"
 )
+
+// defaultPatterns are known dotfile patterns to scan for in HOME.
+var defaultPatterns = []string{
+	// Shell configs
+	".bashrc", ".bash_profile", ".zshrc", ".zshenv", ".zprofile", ".profile",
+
+	// Editors
+	".vimrc", ".vim/", ".emacs", ".emacs.d/",
+
+	// Git
+	".gitconfig", ".gitignore_global",
+
+	// Terminal
+	".tmux.conf", ".inputrc",
+
+	// XDG config - scan all immediate children
+	".config/*",
+}
 
 // FileStatus represents the link status of a dotfile.
 type FileStatus int
@@ -15,7 +35,8 @@ type FileStatus int
 const (
 	FileStatusLinked FileStatus = iota
 	FileStatusMissing
-	FileStatusConflict
+	FileStatusDiff
+	FileStatusUntracked
 )
 
 func (s FileStatus) String() string {
@@ -24,8 +45,10 @@ func (s FileStatus) String() string {
 		return "linked"
 	case FileStatusMissing:
 		return "missing"
-	case FileStatusConflict:
-		return "conflict"
+	case FileStatusDiff:
+		return "diff"
+	case FileStatusUntracked:
+		return "untracked"
 	default:
 		return "unknown"
 	}
@@ -85,9 +108,8 @@ func (c *Checker) getStatusDir(sourceDir, targetDir, prefix string, topLevel boo
 			displayName = filepath.Join(prefix, name)
 		}
 
-		// If source is a directory and target is an existing directory (not a symlink),
-		// recurse into it instead of reporting the whole directory
-		if entry.IsDir() && util.IsDir(targetPath) && !util.IsSymlink(targetPath) {
+		// If source is a directory, always recurse to show individual files
+		if entry.IsDir() {
 			subStatuses, err := c.getStatusDir(sourcePath, targetPath, displayName, false)
 			if err != nil {
 				return statuses, err
@@ -117,23 +139,161 @@ func (c *Checker) checkFile(source, target string) DotfileStatus {
 		return status
 	}
 
-	// Check if it's a symlink
-	if !util.IsSymlink(target) {
-		status.Status = FileStatusConflict
+	// Check if target resolves to source (handles both direct symlinks
+	// and files accessed through symlinked parent directories)
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		status.Status = FileStatusDiff
+		status.Message = "cannot resolve target path"
+		return status
+	}
+
+	resolvedSource, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		resolvedSource = source // use as-is if can't resolve
+	}
+
+	if resolvedTarget == resolvedSource {
+		status.Status = FileStatusLinked
+		status.Message = "linked"
+		return status
+	}
+
+	// Not linked - check if it's a symlink pointing elsewhere or a regular file
+	if util.IsSymlink(target) {
+		linkTarget, _ := util.SymlinkTarget(target)
+		status.Status = FileStatusDiff
+		status.Message = fmt.Sprintf("symlink points to %s", linkTarget)
+	} else {
+		status.Status = FileStatusDiff
+		status.Message = "exists but not linked to repo"
+	}
+	return status
+}
+
+// GetStatusScan scans HOME for known dotfile patterns and returns their status.
+func (c *Checker) GetStatusScan() ([]DotfileStatus, error) {
+	home := c.cfg.TargetDir
+	sourceDir := c.cfg.GetSourcePath()
+
+	var statuses []DotfileStatus
+	seen := make(map[string]bool)
+
+	// Scan known patterns in HOME
+	for _, pattern := range defaultPatterns {
+		if strings.HasSuffix(pattern, "/*") {
+			// Expand wildcard pattern (e.g., .config/*)
+			dir := strings.TrimSuffix(pattern, "/*")
+			dirPath := filepath.Join(home, dir)
+
+			// Skip if the parent directory is already a symlink to repo
+			// (its contents are already covered by the parent)
+			if util.IsSymlink(dirPath) {
+				continue
+			}
+
+			entries, err := os.ReadDir(dirPath)
+			if err != nil {
+				continue // directory doesn't exist, skip
+			}
+			for _, entry := range entries {
+				targetPath := filepath.Join(dirPath, entry.Name())
+				status := c.checkTargetFile(targetPath, sourceDir, home)
+				if status != nil && !seen[status.TargetPath] {
+					seen[status.TargetPath] = true
+					statuses = append(statuses, *status)
+				}
+			}
+		} else {
+			// Direct pattern
+			targetPath := filepath.Join(home, pattern)
+			status := c.checkTargetFile(targetPath, sourceDir, home)
+			if status != nil && !seen[status.TargetPath] {
+				seen[status.TargetPath] = true
+				statuses = append(statuses, *status)
+			}
+		}
+	}
+
+	// Also check repo files that might not match patterns (for "missing" status)
+	repoStatuses, err := c.GetStatus()
+	if err != nil {
+		return nil, err
+	}
+	for _, rs := range repoStatuses {
+		if !seen[rs.TargetPath] {
+			seen[rs.TargetPath] = true
+			statuses = append(statuses, rs)
+		}
+	}
+
+	// Sort by status (ok, diff, missing, untracked) then by path
+	sort.Slice(statuses, func(i, j int) bool {
+		if statuses[i].Status != statuses[j].Status {
+			return statuses[i].Status < statuses[j].Status
+		}
+		return statuses[i].TargetPath < statuses[j].TargetPath
+	})
+
+	return statuses, nil
+}
+
+// checkTargetFile checks a file in the target directory and returns its status.
+func (c *Checker) checkTargetFile(targetPath, sourceDir, home string) *DotfileStatus {
+	if !util.FileExists(targetPath) {
+		return nil // doesn't exist
+	}
+
+	// Calculate the expected source path
+	relPath, err := filepath.Rel(home, targetPath)
+	if err != nil {
+		return nil
+	}
+
+	// Convert target name to source name (remove leading dots if add_dot is true)
+	// e.g., .vimrc -> vimrc, .config/starship.toml -> config/starship.toml
+	sourceName := relPath
+	if c.cfg.AddDot {
+		parts := strings.Split(relPath, string(filepath.Separator))
+		for i, part := range parts {
+			if strings.HasPrefix(part, ".") {
+				parts[i] = strings.TrimPrefix(part, ".")
+			}
+		}
+		sourceName = filepath.Join(parts...)
+	}
+
+	sourcePath := filepath.Join(sourceDir, sourceName)
+
+	status := &DotfileStatus{
+		Name:       relPath,
+		SourcePath: sourcePath,
+		TargetPath: targetPath,
+	}
+
+	// Check if source exists in repo
+	if !util.FileExists(sourcePath) {
+		status.Status = FileStatusUntracked
+		status.Message = "not in repo"
+		return status
+	}
+
+	// Check if it's properly linked
+	if !util.IsSymlink(targetPath) {
+		status.Status = FileStatusDiff
 		status.Message = "exists but not a symlink"
 		return status
 	}
 
-	// Check if symlink points to the right place
-	linkTarget, err := util.SymlinkTarget(target)
+	linkTarget, err := util.SymlinkTarget(targetPath)
 	if err != nil {
-		status.Status = FileStatusConflict
+		status.Status = FileStatusDiff
 		status.Message = "cannot read symlink target"
 		return status
 	}
 
-	if linkTarget != source {
-		status.Status = FileStatusConflict
+	if linkTarget != sourcePath {
+		status.Status = FileStatusDiff
 		status.Message = fmt.Sprintf("symlink points to %s", linkTarget)
 		return status
 	}
@@ -145,7 +305,7 @@ func (c *Checker) checkFile(source, target string) DotfileStatus {
 
 // Print prints the status to stdout.
 func (c *Checker) Print() error {
-	statuses, err := c.GetStatus()
+	statuses, err := c.GetStatusScan()
 	if err != nil {
 		return err
 	}
@@ -155,19 +315,64 @@ func (c *Checker) Print() error {
 		return nil
 	}
 
-	fmt.Println("Dotfiles:")
+	// Calculate max width for target path
+	maxTargetLen := 0
+	for _, s := range statuses {
+		displayTarget := c.formatTargetPath(s.TargetPath)
+		if len(displayTarget) > maxTargetLen {
+			maxTargetLen = len(displayTarget)
+		}
+	}
+
 	for _, s := range statuses {
 		var indicator string
 		switch s.Status {
 		case FileStatusLinked:
-			indicator = "[linked]  "
+			indicator = "[linked]   "
 		case FileStatusMissing:
-			indicator = "[missing] "
-		case FileStatusConflict:
-			indicator = "[conflict]"
+			indicator = "[missing]  "
+		case FileStatusDiff:
+			indicator = "[diff]     "
+		case FileStatusUntracked:
+			indicator = "[untracked]"
 		}
-		fmt.Printf("  %s %s\n", indicator, s.Name)
+
+		displayTarget := c.formatTargetPath(s.TargetPath)
+		displaySource := c.formatSourcePath(s.SourcePath)
+
+		if s.Status == FileStatusUntracked {
+			fmt.Printf("  %s %s\n", indicator, displayTarget)
+		} else {
+			fmt.Printf("  %s %-*s <- %s\n", indicator, maxTargetLen, displayTarget, displaySource)
+		}
 	}
 
 	return nil
+}
+
+// formatTargetPath formats the target path for display (replaces HOME with ~ only if target is HOME).
+func (c *Checker) formatTargetPath(path string) string {
+	home, _ := os.UserHomeDir()
+	targetDir := c.cfg.TargetDir
+
+	// Only use ~ shorthand if target_dir is actually the user's home directory
+	if targetDir == home && strings.HasPrefix(path, home) {
+		return "~" + strings.TrimPrefix(path, home)
+	}
+	return path
+}
+
+// formatSourcePath formats the source path for display (relative to repo root).
+func (c *Checker) formatSourcePath(path string) string {
+	sourceDir := c.cfg.GetSourcePath()
+	repoRoot := c.cfg.RepoRoot()
+
+	// Try to make it relative to source dir first, then repo root
+	if rel, err := filepath.Rel(repoRoot, path); err == nil {
+		return rel
+	}
+	if rel, err := filepath.Rel(sourceDir, path); err == nil {
+		return rel
+	}
+	return path
 }
