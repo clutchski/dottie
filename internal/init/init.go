@@ -64,12 +64,24 @@ const exampleEditorrc = `# Example: becomes ~/.editorrc when linked
 indent_size = 4
 `
 
+const bootstrapScript = `#!/bin/bash
+set -e
+
+REPO="%s"
+
+git clone "$REPO" ~/.dotfiles
+cd ~/.dotfiles
+
+curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/install.sh | bash
+
+dottie install
+dottie link
+`
+
 const readmeTemplate = `# %s
 
-Bootstrap a new machine:
-
 ` + "```" + `bash
-curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/bootstrap.sh | bash -s -- --repo %s
+curl -fsSL %s/main/scripts/bootstrap.sh | bash
 ` + "```" + `
 `
 
@@ -184,13 +196,27 @@ func Init(dir string, dryRun bool) error {
 		return fmt.Errorf("failed to create apt.txt: %w", err)
 	}
 
-	// Create README with repo URL
+	// Create scripts directory with bootstrap.sh
+	scriptsPath := filepath.Join(absDir, "scripts")
+	if err := os.MkdirAll(scriptsPath, 0755); err != nil {
+		return fmt.Errorf("failed to create scripts directory: %w", err)
+	}
+
 	repoName := filepath.Base(absDir)
 	repoURL := getGitRemoteURL(absDir)
 	if repoURL == "" {
 		repoURL = "https://github.com/YOUR_USERNAME/" + repoName
 	}
-	readme := fmt.Sprintf(readmeTemplate, repoName, repoURL)
+
+	bootstrap := fmt.Sprintf(bootstrapScript, repoURL)
+	bootstrapPath := filepath.Join(scriptsPath, "bootstrap.sh")
+	if err := os.WriteFile(bootstrapPath, []byte(bootstrap), 0755); err != nil {
+		return fmt.Errorf("failed to create bootstrap.sh: %w", err)
+	}
+
+	// Create README with raw URL for bootstrap
+	rawURL := strings.Replace(repoURL, "github.com", "raw.githubusercontent.com", 1)
+	readme := fmt.Sprintf(readmeTemplate, repoName, rawURL)
 	readmePath := filepath.Join(absDir, "README.md")
 	if err := os.WriteFile(readmePath, []byte(readme), 0644); err != nil {
 		return fmt.Errorf("failed to create README.md: %w", err)

@@ -67,17 +67,13 @@ dottie status
 
 ## Bootstrap a New Machine
 
-On a fresh machine, run:
+`dottie init` generates a `scripts/bootstrap.sh` in your dotfiles repo. Push it to GitHub, then bootstrap any new machine with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/bootstrap.sh | bash -s -- --repo https://github.com/YOUR_USERNAME/dotfiles
+curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/dotfiles/main/scripts/bootstrap.sh | bash
 ```
 
-This will:
-1. Install dottie
-2. Clone your dotfiles repo
-3. Run `dottie install` (installs packages)
-4. Run `dottie link` (creates symlinks)
+This clones your dotfiles, installs dottie, and runs `dottie install && dottie link`.
 
 ## Commands
 
