@@ -4,27 +4,15 @@ A simple dotfiles manager for macOS and Linux.
 
 ## Installation
 
-### Download Binary
-
-Download the latest release from the [releases page](https://github.com/clutchski/dottie/releases).
+### Quick Install
 
 ```bash
-# macOS (Apple Silicon)
-curl -L https://github.com/clutchski/dottie/releases/latest/download/dottie_Darwin_arm64.tar.gz | tar xz
-sudo mv dottie /usr/local/bin/
-
-# macOS (Intel)
-curl -L https://github.com/clutchski/dottie/releases/latest/download/dottie_Darwin_amd64.tar.gz | tar xz
-sudo mv dottie /usr/local/bin/
-
-# Linux (x86_64)
-curl -L https://github.com/clutchski/dottie/releases/latest/download/dottie_Linux_amd64.tar.gz | tar xz
-sudo mv dottie /usr/local/bin/
-
-# Linux (ARM64)
-curl -L https://github.com/clutchski/dottie/releases/latest/download/dottie_Linux_arm64.tar.gz | tar xz
-sudo mv dottie /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/install.sh | bash
 ```
+
+This auto-detects your OS and architecture and installs the latest release.
+
+Or install a [recent release](https://github.com/clutchski/dottie/releases) manually.
 
 ### Build from Source
 
