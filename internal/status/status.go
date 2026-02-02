@@ -44,7 +44,7 @@ func (s FileStatus) String() string {
 	case FileStatusLinked:
 		return "linked"
 	case FileStatusMissing:
-		return "missing"
+		return "unlinked"
 	case FileStatusDiff:
 		return "diff"
 	case FileStatusUntracked:
@@ -239,9 +239,15 @@ func (c *Checker) GetStatusScan() ([]DotfileStatus, error) {
 }
 
 // checkTargetFile checks a file in the target directory and returns its status.
+// Directories are skipped - only files are reported.
 func (c *Checker) checkTargetFile(targetPath, sourceDir, home string) *DotfileStatus {
 	if !util.FileExists(targetPath) {
 		return nil // doesn't exist
+	}
+
+	// Skip directories - only report files
+	if util.IsDir(targetPath) && !util.IsSymlink(targetPath) {
+		return nil
 	}
 
 	// Calculate the expected source path
@@ -342,7 +348,7 @@ func (c *Checker) Print() error {
 			color = colorGreen
 		case FileStatusMissing:
 			code = "! "
-			label = "missing"
+			label = "unlinked"
 			color = colorRed
 		case FileStatusDiff:
 			code = "!!"

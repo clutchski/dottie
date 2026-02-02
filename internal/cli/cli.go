@@ -273,6 +273,14 @@ func runStatus(args []string) int {
 		return 1
 	}
 
+	// Print brew status on macOS
+	depsDir := cfg.GetDepsPath()
+	installer := install.New(depsDir)
+	if err := installer.PrintStatus(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
 	return 0
 }
 

@@ -114,8 +114,8 @@ func (l *Linker) linkOne(source, target string, dryRun, force bool) Result {
 		Target: target,
 	}
 
-	// Check if target already exists
-	if util.FileExists(target) {
+	// Check if target already exists (including broken symlinks)
+	if util.PathExists(target) {
 		// If it's already a symlink pointing to the right place, skip
 		if util.IsSymlink(target) {
 			linkTarget, err := util.SymlinkTarget(target)

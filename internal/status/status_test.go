@@ -169,7 +169,7 @@ ignore:
 
 func TestFileStatus_String(t *testing.T) {
 	assert.Equal(t, "linked", FileStatusLinked.String())
-	assert.Equal(t, "missing", FileStatusMissing.String())
+	assert.Equal(t, "unlinked", FileStatusMissing.String())
 	assert.Equal(t, "diff", FileStatusDiff.String())
 	assert.Equal(t, "untracked", FileStatusUntracked.String())
 }
@@ -355,13 +355,12 @@ func TestGetStatusScan_ScansConfigDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sourceDir, 0755))
 	require.NoError(t, os.MkdirAll(targetDir, 0755))
 
-	// Create .config/nvim in home (untracked)
+	// Create .config/foo.toml in home (untracked file)
 	configDir := filepath.Join(targetDir, ".config")
 	require.NoError(t, os.MkdirAll(configDir, 0755))
 
-	nvimDir := filepath.Join(configDir, "nvim")
-	require.NoError(t, os.MkdirAll(nvimDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(nvimDir, "init.lua"), []byte("-- nvim"), 0644))
+	fooFile := filepath.Join(configDir, "foo.toml")
+	require.NoError(t, os.WriteFile(fooFile, []byte("# foo"), 0644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir)
 	checker := New(cfg)
@@ -369,16 +368,16 @@ func TestGetStatusScan_ScansConfigDir(t *testing.T) {
 	statuses, err := checker.GetStatusScan()
 	require.NoError(t, err)
 
-	// Find the nvim status
+	// Find the foo.toml status
 	var found *DotfileStatus
 	for i := range statuses {
-		if statuses[i].TargetPath == nvimDir {
+		if statuses[i].TargetPath == fooFile {
 			found = &statuses[i]
 			break
 		}
 	}
 
-	require.NotNil(t, found, "expected to find .config/nvim in statuses")
+	require.NotNil(t, found, "expected to find .config/foo.toml in statuses")
 	assert.Equal(t, FileStatusUntracked, found.Status)
 }
 

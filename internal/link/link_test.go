@@ -150,6 +150,46 @@ func TestLink_ForceOverwrites(t *testing.T) {
 	assert.Empty(t, results[0].BackupPath)
 }
 
+func TestLink_ForceOverwritesBrokenSymlinks(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	// Create source file
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+
+	// Create a broken symlink at target (points to non-existent file)
+	existingVimrc := filepath.Join(targetDir, ".vimrc")
+	nonExistent := filepath.Join(tmpDir, "does-not-exist")
+	require.NoError(t, os.Symlink(nonExistent, existingVimrc))
+
+	// Verify it's a broken symlink
+	_, err := os.Stat(existingVimrc)
+	require.Error(t, err, "symlink should be broken")
+	_, err = os.Lstat(existingVimrc)
+	require.NoError(t, err, "symlink itself should exist")
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	results, err := linker.Link(false, true) // force = true
+	require.NoError(t, err)
+
+	// Verify the broken symlink was replaced with correct one
+	assert.True(t, isSymlink(existingVimrc), "expected symlink at %s", existingVimrc)
+	target, err := os.Readlink(existingVimrc)
+	require.NoError(t, err)
+	assert.Equal(t, vimrc, target, "symlink should point to source file")
+
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusLinked, results[0].Status)
+}
+
 func TestLink_SkipsAlreadyLinked(t *testing.T) {
 	tmpDir := t.TempDir()
 	sourceDir := filepath.Join(tmpDir, "dotfiles")

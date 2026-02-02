@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -81,6 +82,15 @@ func (i *Installer) installBrew(dryRun bool) error {
 		return nil
 	}
 
+	// Check if all packages are already installed (fast)
+	checkCmd := exec.Command("brew", "bundle", "check", "--file="+brewfile)
+	if err := checkCmd.Run(); err == nil {
+		fmt.Println("All Brewfile packages already installed")
+		return nil
+	}
+
+	// Something is missing, run full install
+	fmt.Println("Installing missing packages from Brewfile...")
 	cmd := exec.Command("brew", "bundle", "--file="+brewfile)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -153,6 +163,33 @@ func ParseBrewfile(path string) (packages []string, err error) {
 	}
 
 	return packages, scanner.Err()
+}
+
+// PrintStatus prints the status of brew packages.
+func (i *Installer) PrintStatus() error {
+	if runtime.GOOS != "darwin" {
+		return nil // Only check brew on macOS
+	}
+
+	brewfile := i.GetDepsFile("darwin")
+
+	if _, err := os.Stat(brewfile); os.IsNotExist(err) {
+		return nil // No Brewfile, nothing to check
+	}
+
+	fmt.Println()
+	fmt.Println("Brewfile:")
+
+	cmd := exec.Command("brew", "bundle", "check", "--file="+brewfile, "--verbose")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// brew bundle check exits non-zero when packages are missing
+		fmt.Print(string(output))
+		return nil
+	}
+
+	fmt.Println("  All packages installed")
+	return nil
 }
 
 // ParseAptFile parses an apt.txt file and returns the list of packages.

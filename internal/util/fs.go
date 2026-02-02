@@ -10,8 +10,15 @@ import (
 )
 
 // FileExists returns true if the path exists (file or directory).
+// Note: Returns false for broken symlinks. Use PathExists to detect broken symlinks.
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
+	return err == nil
+}
+
+// PathExists returns true if anything exists at path, including broken symlinks.
+func PathExists(path string) bool {
+	_, err := os.Lstat(path)
 	return err == nil
 }
 
