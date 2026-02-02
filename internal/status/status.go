@@ -53,7 +53,12 @@ func New(cfg *config.Config) *Checker {
 // GetStatus returns the status of all dotfiles.
 func (c *Checker) GetStatus() ([]DotfileStatus, error) {
 	sourceDir := c.cfg.GetSourcePath()
+	return c.getStatusDir(sourceDir, c.cfg.TargetDir, "", true)
+}
 
+// getStatusDir recursively gets status of files in sourceDir.
+// prefix is used to build display names like "config/starship.toml".
+func (c *Checker) getStatusDir(sourceDir, targetDir, prefix string, topLevel bool) ([]DotfileStatus, error) {
 	entries, err := os.ReadDir(sourceDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read source directory: %w", err)
@@ -69,10 +74,30 @@ func (c *Checker) GetStatus() ([]DotfileStatus, error) {
 		}
 
 		sourcePath := filepath.Join(sourceDir, name)
-		targetPath := c.cfg.GetTargetPath(name)
+
+		var targetPath string
+		var displayName string
+		if topLevel {
+			targetPath = c.cfg.GetTargetPath(name)
+			displayName = name
+		} else {
+			targetPath = filepath.Join(targetDir, name)
+			displayName = filepath.Join(prefix, name)
+		}
+
+		// If source is a directory and target is an existing directory (not a symlink),
+		// recurse into it instead of reporting the whole directory
+		if entry.IsDir() && util.IsDir(targetPath) && !util.IsSymlink(targetPath) {
+			subStatuses, err := c.getStatusDir(sourcePath, targetPath, displayName, false)
+			if err != nil {
+				return statuses, err
+			}
+			statuses = append(statuses, subStatuses...)
+			continue
+		}
 
 		status := c.checkFile(sourcePath, targetPath)
-		status.Name = name
+		status.Name = displayName
 		status.SourcePath = sourcePath
 		status.TargetPath = targetPath
 

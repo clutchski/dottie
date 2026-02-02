@@ -17,7 +17,9 @@ Or install a [recent release](https://github.com/clutchski/dottie/releases) manu
 ### Build from Source
 
 ```bash
-go install github.com/clutchski/dottie/cmd/dottie@latest
+git clone https://github.com/clutchski/dottie.git
+cd dottie
+make install
 ```
 
 ## Quick Start
@@ -73,7 +75,7 @@ dottie status
 curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/dotfiles/main/scripts/bootstrap.sh | bash
 ```
 
-This clones your dotfiles, installs dottie, and runs `dottie install && dottie link`.
+This clones your dotfiles, installs dottie, and runs `dottie run`.
 
 ## Commands
 

@@ -61,7 +61,12 @@ func New(cfg *config.Config) *Linker {
 // If force is true, existing files are overwritten without backup.
 func (l *Linker) Link(dryRun, force bool) ([]Result, error) {
 	sourceDir := l.cfg.GetSourcePath()
+	return l.linkDir(sourceDir, l.cfg.TargetDir, dryRun, force, true)
+}
 
+// linkDir recursively links contents of sourceDir to targetDir.
+// If topLevel is true, applies add_dot transformation to names.
+func (l *Linker) linkDir(sourceDir, targetDir string, dryRun, force, topLevel bool) ([]Result, error) {
 	entries, err := os.ReadDir(sourceDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read source directory: %w", err)
@@ -77,7 +82,24 @@ func (l *Linker) Link(dryRun, force bool) ([]Result, error) {
 		}
 
 		sourcePath := filepath.Join(sourceDir, name)
-		targetPath := l.cfg.GetTargetPath(name)
+
+		var targetPath string
+		if topLevel {
+			targetPath = l.cfg.GetTargetPath(name)
+		} else {
+			targetPath = filepath.Join(targetDir, name)
+		}
+
+		// If source is a directory and target is an existing directory (not a symlink),
+		// recurse into it instead of linking the whole directory
+		if entry.IsDir() && util.IsDir(targetPath) && !util.IsSymlink(targetPath) {
+			subResults, err := l.linkDir(sourcePath, targetPath, dryRun, force, false)
+			if err != nil {
+				return results, err
+			}
+			results = append(results, subResults...)
+			continue
+		}
 
 		result := l.linkOne(sourcePath, targetPath, dryRun, force)
 		results = append(results, result)
@@ -101,6 +123,14 @@ func (l *Linker) linkOne(source, target string, dryRun, force bool) Result {
 				result.Status = StatusAlreadyLinked
 				return result
 			}
+		}
+
+		// If source is a directory and target is an existing directory (not a symlink),
+		// recurse into it and link contents individually instead of replacing the directory
+		sourceInfo, err := os.Stat(source)
+		if err == nil && sourceInfo.IsDir() && util.IsDir(target) && !util.IsSymlink(target) {
+			result.Status = StatusSkipped // The directory itself is skipped, contents are linked
+			return result
 		}
 
 		// Handle existing file

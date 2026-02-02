@@ -94,6 +94,48 @@ func TestInit_CreatesExampleFiles(t *testing.T) {
 	assert.Contains(t, string(content), "bootstrap.sh")
 }
 
+func TestInit_CreatesConfigDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetDir := filepath.Join(tmpDir, "dotfiles")
+
+	err := Init(targetDir, false)
+	require.NoError(t, err)
+
+	// Check config directory exists with example file
+	assert.DirExists(t, filepath.Join(targetDir, "home", "config"))
+	assert.FileExists(t, filepath.Join(targetDir, "home", "config", "starship.toml"))
+
+	// Check content explains directory linking
+	content, err := os.ReadFile(filepath.Join(targetDir, "home", "config", "starship.toml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "~/.config/starship.toml")
+}
+
+func TestInit_CreatesBootstrapScript(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetDir := filepath.Join(tmpDir, "dotfiles")
+
+	err := Init(targetDir, false)
+	require.NoError(t, err)
+
+	// Check scripts directory and bootstrap.sh exist
+	assert.DirExists(t, filepath.Join(targetDir, "scripts"))
+	bootstrapPath := filepath.Join(targetDir, "scripts", "bootstrap.sh")
+	assert.FileExists(t, bootstrapPath)
+
+	// Check bootstrap.sh content
+	content, err := os.ReadFile(bootstrapPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "#!/bin/bash")
+	assert.Contains(t, string(content), "git clone")
+	assert.Contains(t, string(content), "dottie run")
+
+	// Check bootstrap.sh is executable
+	info, err := os.Stat(bootstrapPath)
+	require.NoError(t, err)
+	assert.True(t, info.Mode()&0111 != 0, "bootstrap.sh should be executable")
+}
+
 func TestInit_DryRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")

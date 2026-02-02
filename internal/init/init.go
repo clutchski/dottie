@@ -64,6 +64,12 @@ const exampleEditorrc = `# Example: becomes ~/.editorrc when linked
 indent_size = 4
 `
 
+const exampleStarship = `# Example: becomes ~/.config/starship.toml when linked
+# Shows how to link files into directories that already exist
+
+format = "$directory$git_branch$character"
+`
+
 const bootstrapScript = `#!/bin/bash
 set -e
 
@@ -74,8 +80,7 @@ cd ~/.dotfiles
 
 curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/install.sh | bash
 
-dottie install
-dottie link
+dottie run
 `
 
 const readmeTemplate = `# %s
@@ -160,6 +165,17 @@ func Init(dir string, dryRun bool) error {
 	editorrcPath := filepath.Join(homePath, "editorrc")
 	if err := os.WriteFile(editorrcPath, []byte(exampleEditorrc), 0644); err != nil {
 		return fmt.Errorf("failed to create example editorrc: %w", err)
+	}
+
+	// Create config directory with example (demonstrates linking into existing directories)
+	homeConfigPath := filepath.Join(homePath, "config")
+	if err := os.MkdirAll(homeConfigPath, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	starshipPath := filepath.Join(homeConfigPath, "starship.toml")
+	if err := os.WriteFile(starshipPath, []byte(exampleStarship), 0644); err != nil {
+		return fmt.Errorf("failed to create example starship.toml: %w", err)
 	}
 
 	// Create hooks directories

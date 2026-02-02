@@ -172,3 +172,78 @@ func TestFileStatus_String(t *testing.T) {
 	assert.Equal(t, "missing", FileStatusMissing.String())
 	assert.Equal(t, "conflict", FileStatusConflict.String())
 }
+
+func TestGetStatus_RecursesIntoExistingDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	// Create source config/starship.toml
+	sourceConfig := filepath.Join(sourceDir, "config")
+	require.NoError(t, os.MkdirAll(sourceConfig, 0755))
+	starshipSrc := filepath.Join(sourceConfig, "starship.toml")
+	require.NoError(t, os.WriteFile(starshipSrc, []byte("format = \"$directory\""), 0644))
+
+	// Pre-existing .config directory in target
+	existingConfig := filepath.Join(targetDir, ".config")
+	require.NoError(t, os.MkdirAll(existingConfig, 0755))
+
+	// Link starship.toml inside .config
+	starshipTarget := filepath.Join(existingConfig, "starship.toml")
+	require.NoError(t, os.Symlink(starshipSrc, starshipTarget))
+
+	cfg := createTestConfig(t, sourceDir, targetDir)
+	checker := New(cfg)
+
+	statuses, err := checker.GetStatus()
+	require.NoError(t, err)
+
+	// Should show config/starship.toml, not just config
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "config/starship.toml", statuses[0].Name)
+	assert.Equal(t, FileStatusLinked, statuses[0].Status)
+}
+
+func TestGetStatus_ShowsMultipleFilesInExistingDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	// Create source config/ with multiple files
+	sourceConfig := filepath.Join(sourceDir, "config")
+	require.NoError(t, os.MkdirAll(sourceConfig, 0755))
+
+	starshipSrc := filepath.Join(sourceConfig, "starship.toml")
+	require.NoError(t, os.WriteFile(starshipSrc, []byte("starship config"), 0644))
+
+	alacrittySrc := filepath.Join(sourceConfig, "alacritty.toml")
+	require.NoError(t, os.WriteFile(alacrittySrc, []byte("alacritty config"), 0644))
+
+	// Pre-existing .config directory with only starship linked
+	existingConfig := filepath.Join(targetDir, ".config")
+	require.NoError(t, os.MkdirAll(existingConfig, 0755))
+	require.NoError(t, os.Symlink(starshipSrc, filepath.Join(existingConfig, "starship.toml")))
+
+	cfg := createTestConfig(t, sourceDir, targetDir)
+	checker := New(cfg)
+
+	statuses, err := checker.GetStatus()
+	require.NoError(t, err)
+
+	// Should show both files with their individual statuses
+	require.Len(t, statuses, 2)
+
+	statusMap := make(map[string]FileStatus)
+	for _, s := range statuses {
+		statusMap[s.Name] = s.Status
+	}
+
+	assert.Equal(t, FileStatusLinked, statusMap["config/starship.toml"])
+	assert.Equal(t, FileStatusMissing, statusMap["config/alacritty.toml"])
+}
