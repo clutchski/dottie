@@ -9,8 +9,8 @@ import (
 func TestLoadConfig_Defaults(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create minimal config file
-	configPath := filepath.Join(tmpDir, ".dottie.yaml")
+	// Create minimal config file (dottie.yaml, not .dottie.yaml)
+	configPath := filepath.Join(tmpDir, "dottie.yaml")
 	if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
 		t.Fatalf("Failed to create config file: %v", err)
 	}
@@ -21,8 +21,8 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 
 	// Check defaults
-	if cfg.SourceDir != "." {
-		t.Errorf("SourceDir = %q, want %q", cfg.SourceDir, ".")
+	if cfg.SourceDir != "home" {
+		t.Errorf("SourceDir = %q, want %q", cfg.SourceDir, "home")
 	}
 	if cfg.AddDot != true {
 		t.Errorf("AddDot = %v, want true", cfg.AddDot)
@@ -100,8 +100,8 @@ func TestLoadConfig_NoConfigFile(t *testing.T) {
 	}
 
 	// Check defaults are applied
-	if cfg.SourceDir != "." {
-		t.Errorf("SourceDir = %q, want %q", cfg.SourceDir, ".")
+	if cfg.SourceDir != "home" {
+		t.Errorf("SourceDir = %q, want %q", cfg.SourceDir, "home")
 	}
 	if cfg.AddDot != true {
 		t.Errorf("AddDot = %v, want true", cfg.AddDot)

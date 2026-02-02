@@ -9,7 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const ConfigFileName = ".dottie.yaml"
+// ConfigFileNames are the possible config file names (checked in order).
+var ConfigFileNames = []string{"dottie.yaml", ".dottie.yaml"}
 
 // Config represents the dottie configuration.
 type Config struct {
@@ -30,6 +31,7 @@ type Config struct {
 var alwaysIgnored = []string{
 	".git",
 	".dottie.yaml",
+	"dottie.yaml",
 	"hooks",
 	"deps",
 }
@@ -41,7 +43,7 @@ func Load(dir string) (*Config, error) {
 
 	cfg := &Config{
 		// Set defaults
-		SourceDir: ".",
+		SourceDir: "home",
 		TargetDir: home,
 		AddDot:    true,
 		BackupDir: "~/.dottie.backup",
@@ -51,8 +53,16 @@ func Load(dir string) (*Config, error) {
 		repoRoot:  dir,
 	}
 
-	configPath := filepath.Join(dir, ConfigFileName)
-	data, err := os.ReadFile(configPath)
+	// Try each config file name
+	var data []byte
+	var err error
+	for _, name := range ConfigFileNames {
+		configPath := filepath.Join(dir, name)
+		data, err = os.ReadFile(configPath)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No config file - use defaults
