@@ -177,3 +177,105 @@ func TestBackupFile(t *testing.T) {
 		t.Errorf("Backup content = %q, want %q", backupContent, content)
 	}
 }
+
+func TestBackupFile_Symlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	backupDir := filepath.Join(tmpDir, "backups")
+
+	// Create a target file and a symlink to it
+	targetFile := filepath.Join(tmpDir, "target.txt")
+	if err := os.WriteFile(targetFile, []byte("target content"), 0644); err != nil {
+		t.Fatalf("Failed to create target file: %v", err)
+	}
+
+	symlink := filepath.Join(tmpDir, "link")
+	if err := os.Symlink(targetFile, symlink); err != nil {
+		t.Fatalf("Failed to create symlink: %v", err)
+	}
+
+	// Backup the symlink
+	backupPath, err := BackupFile(symlink, backupDir)
+	if err != nil {
+		t.Fatalf("BackupFile() returned error: %v", err)
+	}
+
+	// Check backup exists
+	if !PathExists(backupPath) {
+		t.Fatalf("Backup not created at %q", backupPath)
+	}
+
+	// Check backup is a symlink (not a regular file)
+	if !IsSymlink(backupPath) {
+		t.Errorf("Backup at %q is not a symlink", backupPath)
+	}
+
+	// Check symlink points to the same target
+	backupTarget, err := os.Readlink(backupPath)
+	if err != nil {
+		t.Fatalf("Failed to read backup symlink: %v", err)
+	}
+	if backupTarget != targetFile {
+		t.Errorf("Backup symlink target = %q, want %q", backupTarget, targetFile)
+	}
+}
+
+func TestBackupFile_Directory(t *testing.T) {
+	tmpDir := t.TempDir()
+	backupDir := filepath.Join(tmpDir, "backups")
+
+	// Create a directory with files and a symlink inside
+	sourceDir := filepath.Join(tmpDir, "mydir")
+	if err := os.MkdirAll(sourceDir, 0755); err != nil {
+		t.Fatalf("Failed to create source dir: %v", err)
+	}
+
+	// Create a regular file inside the directory
+	fileInDir := filepath.Join(sourceDir, "file.txt")
+	if err := os.WriteFile(fileInDir, []byte("file content"), 0644); err != nil {
+		t.Fatalf("Failed to create file in dir: %v", err)
+	}
+
+	// Create a symlink inside the directory
+	linkTarget := filepath.Join(tmpDir, "external.txt")
+	if err := os.WriteFile(linkTarget, []byte("external"), 0644); err != nil {
+		t.Fatalf("Failed to create external file: %v", err)
+	}
+	linkInDir := filepath.Join(sourceDir, "link")
+	if err := os.Symlink(linkTarget, linkInDir); err != nil {
+		t.Fatalf("Failed to create symlink in dir: %v", err)
+	}
+
+	// Backup the directory
+	backupPath, err := BackupFile(sourceDir, backupDir)
+	if err != nil {
+		t.Fatalf("BackupFile() returned error: %v", err)
+	}
+
+	// Check backup is a directory
+	if !IsDir(backupPath) {
+		t.Fatalf("Backup at %q is not a directory", backupPath)
+	}
+
+	// Check file inside backup
+	backupFile := filepath.Join(backupPath, "file.txt")
+	content, err := os.ReadFile(backupFile)
+	if err != nil {
+		t.Fatalf("Failed to read backed up file: %v", err)
+	}
+	if string(content) != "file content" {
+		t.Errorf("Backed up file content = %q, want %q", content, "file content")
+	}
+
+	// Check symlink inside backup is preserved as a symlink
+	backupLink := filepath.Join(backupPath, "link")
+	if !IsSymlink(backupLink) {
+		t.Errorf("Backed up link at %q is not a symlink", backupLink)
+	}
+	backupLinkTarget, err := os.Readlink(backupLink)
+	if err != nil {
+		t.Fatalf("Failed to read backed up symlink: %v", err)
+	}
+	if backupLinkTarget != linkTarget {
+		t.Errorf("Backed up symlink target = %q, want %q", backupLinkTarget, linkTarget)
+	}
+}

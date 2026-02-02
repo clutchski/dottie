@@ -59,8 +59,9 @@ func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0755)
 }
 
-// BackupFile copies a file to the backup directory with a timestamp.
-// Returns the path to the backup file.
+// BackupFile copies a file, symlink, or directory to the backup directory with a timestamp.
+// Symlinks are preserved as symlinks. Directories are copied recursively.
+// Returns the path to the backup.
 func BackupFile(src, backupDir string) (string, error) {
 	if err := EnsureDir(backupDir); err != nil {
 		return "", fmt.Errorf("failed to create backup directory: %w", err)
@@ -72,7 +73,31 @@ func BackupFile(src, backupDir string) (string, error) {
 	backupName := fmt.Sprintf("%s.%s", base, timestamp)
 	backupPath := filepath.Join(backupDir, backupName)
 
-	// Copy the file
+	// If src is a symlink, preserve it as a symlink
+	if IsSymlink(src) {
+		target, err := os.Readlink(src)
+		if err != nil {
+			return "", fmt.Errorf("failed to read symlink: %w", err)
+		}
+		if err := os.Symlink(target, backupPath); err != nil {
+			return "", fmt.Errorf("failed to backup symlink: %w", err)
+		}
+		return backupPath, nil
+	}
+
+	// If src is a directory, copy recursively
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat source: %w", err)
+	}
+	if srcInfo.IsDir() {
+		if err := CopyDir(src, backupPath); err != nil {
+			return "", fmt.Errorf("failed to backup directory: %w", err)
+		}
+		return backupPath, nil
+	}
+
+	// Regular file - use CopyFile
 	if err := CopyFile(src, backupPath); err != nil {
 		return "", fmt.Errorf("failed to backup file: %w", err)
 	}
@@ -109,6 +134,52 @@ func CopyFile(src, dst string) (err error) {
 
 	_, err = io.Copy(dstFile, srcFile)
 	return err
+}
+
+// CopyDir recursively copies a directory, preserving symlinks.
+func CopyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		// Check if it's a symlink (entry.Type() includes symlink info)
+		if entry.Type()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(srcPath)
+			if err != nil {
+				return err
+			}
+			if err := os.Symlink(target, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if entry.IsDir() {
+			if err := CopyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := CopyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // IsDir returns true if the path is a directory.

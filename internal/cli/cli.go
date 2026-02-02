@@ -145,9 +145,15 @@ func runLink(args []string) int {
 		return 1
 	}
 
-	// Print results only with -v
-	if *verbose {
-		for _, r := range results {
+	// Print results
+	for _, r := range results {
+		// Always print backup notices
+		if r.BackupPath != "" {
+			fmt.Printf("backed up %s -> %s\n", r.Target, r.BackupPath)
+		}
+
+		// Print detailed results only with -v
+		if *verbose {
 			var prefix string
 			switch r.Status {
 			case link.StatusLinked:
@@ -162,9 +168,6 @@ func runLink(args []string) int {
 				prefix = "[error]     "
 			}
 			fmt.Printf("%s %s -> %s\n", prefix, filepath.Base(r.Source), r.Target)
-			if r.BackupPath != "" {
-				fmt.Printf("            backed up to %s\n", r.BackupPath)
-			}
 			if r.Error != nil {
 				fmt.Fprintf(os.Stderr, "            %v\n", r.Error)
 			}
