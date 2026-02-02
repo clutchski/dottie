@@ -34,7 +34,18 @@ checksum:
   name_template: 'checksums.txt'
 
 changelog:
+  use: github
   sort: asc
+  abbrev: 7
+  groups:
+    - title: Features
+      regexp: '^.*?Add|Improve|Support.*$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?Fix.*$'
+      order: 1
+    - title: Other
+      order: 999
   filters:
     exclude:
       - '^docs:'
@@ -42,6 +53,7 @@ changelog:
       - '^chore:'
       - Merge pull request
       - Merge branch
+      - Co-Authored-By
 
 release:
   github:
