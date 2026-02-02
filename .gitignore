@@ -1,0 +1,12 @@
+# Build artifacts
+/dottie
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store

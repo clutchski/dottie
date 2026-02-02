@@ -1,0 +1,64 @@
+version: 2
+
+project_name: dottie
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/dottie
+    binary: dottie
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+brews:
+  - repository:
+      owner: clutchski
+      name: homebrew-tap
+    directory: Formula
+    homepage: "https://github.com/clutchski/dottie"
+    description: "Simple dotfiles manager"
+    license: "MIT"
+    test: |
+      system "#{bin}/dottie", "--version"
+    install: |
+      bin.install "dottie"
+
+release:
+  github:
+    owner: clutchski
+    name: dottie
+  draft: false
+  prerelease: auto
