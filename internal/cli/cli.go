@@ -120,6 +120,8 @@ func runLink(args []string) int {
 	fs.BoolVar(dryRun, "dry-run", false, "dry-run")
 	force := fs.Bool("f", false, "force")
 	fs.BoolVar(force, "force", false, "force")
+	verbose := fs.Bool("v", false, "verbose")
+	fs.BoolVar(verbose, "verbose", false, "verbose")
 	_ = fs.Parse(args)
 
 	cfg, err := loadConfig()
@@ -143,27 +145,29 @@ func runLink(args []string) int {
 		return 1
 	}
 
-	// Print results
-	for _, r := range results {
-		var prefix string
-		switch r.Status {
-		case link.StatusLinked:
-			prefix = "[linked]  "
-		case link.StatusWouldLink:
-			prefix = "[would link]"
-		case link.StatusAlreadyLinked:
-			prefix = "[ok]      "
-		case link.StatusSkipped:
-			prefix = "[skipped] "
-		case link.StatusError:
-			prefix = "[error]   "
-		}
-		fmt.Printf("%s %s -> %s\n", prefix, filepath.Base(r.Source), r.Target)
-		if r.BackupPath != "" {
-			fmt.Printf("           backed up to %s\n", r.BackupPath)
-		}
-		if r.Error != nil {
-			fmt.Printf("           %v\n", r.Error)
+	// Print results only with -v
+	if *verbose {
+		for _, r := range results {
+			var prefix string
+			switch r.Status {
+			case link.StatusLinked:
+				prefix = "[linked]    "
+			case link.StatusWouldLink:
+				prefix = "[would link]"
+			case link.StatusAlreadyLinked:
+				prefix = "[ok]        "
+			case link.StatusSkipped:
+				prefix = "[skipped]   "
+			case link.StatusError:
+				prefix = "[error]     "
+			}
+			fmt.Printf("%s %s -> %s\n", prefix, filepath.Base(r.Source), r.Target)
+			if r.BackupPath != "" {
+				fmt.Printf("            backed up to %s\n", r.BackupPath)
+			}
+			if r.Error != nil {
+				fmt.Fprintf(os.Stderr, "            %v\n", r.Error)
+			}
 		}
 	}
 

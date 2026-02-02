@@ -303,6 +303,15 @@ func (c *Checker) checkTargetFile(targetPath, sourceDir, home string) *DotfileSt
 	return status
 }
 
+// ANSI color codes
+const (
+	colorReset  = "\033[0m"
+	colorGreen  = "\033[32m"
+	colorRed    = "\033[31m"
+	colorYellow = "\033[33m"
+	colorGray   = "\033[90m"
+)
+
 // Print prints the status to stdout.
 func (c *Checker) Print() error {
 	statuses, err := c.GetStatusScan()
@@ -325,25 +334,35 @@ func (c *Checker) Print() error {
 	}
 
 	for _, s := range statuses {
-		var indicator string
+		var code, label, color string
 		switch s.Status {
 		case FileStatusLinked:
-			indicator = "[linked]   "
+			code = "  "
+			label = "ok"
+			color = colorGreen
 		case FileStatusMissing:
-			indicator = "[missing]  "
+			code = "! "
+			label = "missing"
+			color = colorRed
 		case FileStatusDiff:
-			indicator = "[diff]     "
+			code = "!!"
+			label = "conflict"
+			color = colorYellow
 		case FileStatusUntracked:
-			indicator = "[untracked]"
+			code = "??"
+			label = "untracked"
+			color = colorGray
 		}
 
 		displayTarget := c.formatTargetPath(s.TargetPath)
 		displaySource := c.formatSourcePath(s.SourcePath)
 
 		if s.Status == FileStatusUntracked {
-			fmt.Printf("  %s %s\n", indicator, displayTarget)
+			fmt.Printf("%s%s %-9s%s %s\n", color, code, label, colorReset, displayTarget)
 		} else {
-			fmt.Printf("  %s %-*s <- %s\n", indicator, maxTargetLen, displayTarget, displaySource)
+			fmt.Printf("%s%s %-9s%s %-*s -> %s\n",
+				color, code, label, colorReset,
+				maxTargetLen, displayTarget, displaySource)
 		}
 	}
 
