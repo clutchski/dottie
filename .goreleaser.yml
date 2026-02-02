@@ -43,19 +43,6 @@ changelog:
       - Merge pull request
       - Merge branch
 
-brews:
-  - repository:
-      owner: clutchski
-      name: homebrew-tap
-    directory: Formula
-    homepage: "https://github.com/clutchski/dottie"
-    description: "Simple dotfiles manager"
-    license: "MIT"
-    test: |
-      system "#{bin}/dottie", "--version"
-    install: |
-      bin.install "dottie"
-
 release:
   github:
     owner: clutchski
