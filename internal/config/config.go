@@ -20,7 +20,6 @@ type Config struct {
 	BackupDir string   `yaml:"backup_dir"`
 	Conflict  string   `yaml:"conflict"`
 	Ignore    []string `yaml:"ignore"`
-	DepsDir   string   `yaml:"deps_dir"`
 	HooksDir  string   `yaml:"hooks_dir"`
 
 	// Internal fields
@@ -33,7 +32,6 @@ var alwaysIgnored = []string{
 	".dottie.yaml",
 	"dottie.yaml",
 	"hooks",
-	"deps",
 }
 
 // Load loads the configuration from the given directory.
@@ -48,7 +46,6 @@ func Load(dir string) (*Config, error) {
 		AddDot:    true,
 		BackupDir: "~/.dottie.backup",
 		Conflict:  "backup",
-		DepsDir:   "deps",
 		HooksDir:  "hooks",
 		repoRoot:  dir,
 	}
@@ -91,9 +88,6 @@ func Load(dir string) (*Config, error) {
 	if cfg.Conflict == "" {
 		cfg.Conflict = "backup"
 	}
-	if cfg.DepsDir == "" {
-		cfg.DepsDir = "deps"
-	}
 	if cfg.HooksDir == "" {
 		cfg.HooksDir = "hooks"
 	}
@@ -114,8 +108,8 @@ func (c *Config) ShouldIgnore(path string) bool {
 		}
 	}
 
-	// Check hooks and deps directories
-	if base == c.HooksDir || base == c.DepsDir {
+	// Check hooks directory
+	if base == c.HooksDir {
 		return true
 	}
 
@@ -157,9 +151,9 @@ func (c *Config) GetHooksPath() string {
 	return filepath.Join(c.repoRoot, c.HooksDir)
 }
 
-// GetDepsPath returns the absolute path to the deps directory.
-func (c *Config) GetDepsPath() string {
-	return filepath.Join(c.repoRoot, c.DepsDir)
+// GetTargetDir returns the target directory (usually $HOME).
+func (c *Config) GetTargetDir() string {
+	return c.TargetDir
 }
 
 // GetBackupPath returns the expanded backup directory path.

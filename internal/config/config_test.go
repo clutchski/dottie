@@ -30,9 +30,6 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.Conflict != "backup" {
 		t.Errorf("Conflict = %q, want %q", cfg.Conflict, "backup")
 	}
-	if cfg.DepsDir != "deps" {
-		t.Errorf("DepsDir = %q, want %q", cfg.DepsDir, "deps")
-	}
 	if cfg.HooksDir != "hooks" {
 		t.Errorf("HooksDir = %q, want %q", cfg.HooksDir, "hooks")
 	}
@@ -51,7 +48,6 @@ ignore:
   - README.md
   - LICENSE
   - "*.bak"
-deps_dir: packages
 hooks_dir: scripts
 `
 	configPath := filepath.Join(tmpDir, ".dottie.yaml")
@@ -81,9 +77,6 @@ hooks_dir: scripts
 	}
 	if len(cfg.Ignore) != 3 {
 		t.Errorf("len(Ignore) = %d, want 3", len(cfg.Ignore))
-	}
-	if cfg.DepsDir != "packages" {
-		t.Errorf("DepsDir = %q, want %q", cfg.DepsDir, "packages")
 	}
 	if cfg.HooksDir != "scripts" {
 		t.Errorf("HooksDir = %q, want %q", cfg.HooksDir, "scripts")

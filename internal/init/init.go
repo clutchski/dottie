@@ -32,26 +32,6 @@ ignore:
   - LICENSE
 `
 
-const defaultBrewfile = `# Homebrew packages
-# Uncomment or add packages you want to install
-
-# brew "git"
-# brew "vim"
-# brew "tmux"
-# brew "ripgrep"
-# brew "fzf"
-`
-
-const defaultAptTxt = `# APT packages (one per line)
-# Uncomment or add packages you want to install
-
-# git
-# vim
-# tmux
-# ripgrep
-# fzf
-`
-
 const exampleShellrc = `# Example: becomes ~/.shellrc when linked
 # Replace with your actual dotfiles!
 
@@ -70,6 +50,53 @@ const exampleStarship = `# Example: becomes ~/.config/starship.toml when linked
 format = "$directory$git_branch$character"
 `
 
+const hookExampleTemplate = `#!/bin/bash
+# Example hook template
+# Copy this file: cp hooks/hook.example.sh hooks/my-hook.sh
+# Then edit my-hook.sh to add your logic
+
+case "$1" in
+    pre-link)
+        echo "Running pre-link for my-hook"
+        ;;
+    post-link)
+        echo "Running post-link for my-hook"
+        ;;
+    status)
+        echo "my-hook status: ok"
+        ;;
+esac
+`
+
+const homebrewExampleTemplate = `#!/bin/bash
+# Homebrew package management hook
+# To enable: cp hooks/homebrew.example.sh hooks/homebrew.sh
+set -e
+BREWFILE="$DOTTIE_ROOT/Brewfile"
+
+case "$1" in
+    pre-link)
+        if [[ -f "$BREWFILE" ]]; then
+            if [[ "$DOTTIE_DRY_RUN" == "true" ]]; then
+                echo "[dry-run] would run: brew bundle --file=$BREWFILE"
+            else
+                brew bundle check --file="$BREWFILE" 2>/dev/null || brew bundle --file="$BREWFILE"
+            fi
+        fi
+        ;;
+    status)
+        if [[ -f "$BREWFILE" ]]; then
+            echo "Brewfile:"
+            if brew bundle check --file="$BREWFILE" 2>/dev/null; then
+                echo "  All packages installed"
+            else
+                brew bundle check --file="$BREWFILE" --verbose 2>&1 | grep "needs to be installed" | sed 's/^/  /' || true
+            fi
+        fi
+        ;;
+esac
+`
+
 const bootstrapScript = `#!/bin/bash
 set -e
 
@@ -80,7 +107,7 @@ cd ~/.dotfiles
 
 curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/install.sh | bash
 
-dottie run
+dottie link
 `
 
 const readmeTemplate = `# %s
@@ -136,7 +163,6 @@ func Init(dir string, dryRun bool) error {
 		fmt.Printf("  %s\n", configPath)
 		fmt.Printf("  %s\n", filepath.Join(absDir, "home/"))
 		fmt.Printf("  %s\n", filepath.Join(absDir, "hooks/"))
-		fmt.Printf("  %s\n", filepath.Join(absDir, "deps/"))
 		fmt.Printf("  %s\n", filepath.Join(absDir, "README.md"))
 		return nil
 	}
@@ -178,38 +204,20 @@ func Init(dir string, dryRun bool) error {
 		return fmt.Errorf("failed to create example starship.toml: %w", err)
 	}
 
-	// Create hooks directories
-	hookDirs := []string{
-		"hooks/pre-install",
-		"hooks/post-install",
-		"hooks/pre-link",
-		"hooks/post-link",
-	}
-	for _, hookDir := range hookDirs {
-		hookPath := filepath.Join(absDir, hookDir)
-		if err := os.MkdirAll(hookPath, 0755); err != nil {
-			return fmt.Errorf("failed to create hooks directory: %w", err)
-		}
-		gitkeepPath := filepath.Join(hookPath, ".gitkeep")
-		if err := os.WriteFile(gitkeepPath, []byte(""), 0644); err != nil {
-			return fmt.Errorf("failed to create .gitkeep: %w", err)
-		}
+	// Create hooks directory with example hooks
+	hooksPath := filepath.Join(absDir, "hooks")
+	if err := os.MkdirAll(hooksPath, 0755); err != nil {
+		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
-	// Create deps directory
-	depsPath := filepath.Join(absDir, "deps")
-	if err := os.MkdirAll(depsPath, 0755); err != nil {
-		return fmt.Errorf("failed to create deps directory: %w", err)
+	hookExamplePath := filepath.Join(hooksPath, "hook.example.sh")
+	if err := os.WriteFile(hookExamplePath, []byte(hookExampleTemplate), 0755); err != nil {
+		return fmt.Errorf("failed to create hook.example.sh: %w", err)
 	}
 
-	brewfilePath := filepath.Join(depsPath, "Brewfile")
-	if err := os.WriteFile(brewfilePath, []byte(defaultBrewfile), 0644); err != nil {
-		return fmt.Errorf("failed to create Brewfile: %w", err)
-	}
-
-	aptPath := filepath.Join(depsPath, "apt.txt")
-	if err := os.WriteFile(aptPath, []byte(defaultAptTxt), 0644); err != nil {
-		return fmt.Errorf("failed to create apt.txt: %w", err)
+	homebrewExamplePath := filepath.Join(hooksPath, "homebrew.example.sh")
+	if err := os.WriteFile(homebrewExamplePath, []byte(homebrewExampleTemplate), 0755); err != nil {
+		return fmt.Errorf("failed to create homebrew.example.sh: %w", err)
 	}
 
 	// Create scripts directory with bootstrap.sh

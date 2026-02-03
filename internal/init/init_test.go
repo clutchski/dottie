@@ -22,14 +22,8 @@ func TestInit_CreatesStructure(t *testing.T) {
 	// Check home directory
 	assert.DirExists(t, filepath.Join(targetDir, "home"))
 
-	// Check hooks directories
-	assert.DirExists(t, filepath.Join(targetDir, "hooks", "pre-install"))
-	assert.DirExists(t, filepath.Join(targetDir, "hooks", "post-install"))
-	assert.DirExists(t, filepath.Join(targetDir, "hooks", "pre-link"))
-	assert.DirExists(t, filepath.Join(targetDir, "hooks", "post-link"))
-
-	// Check deps directory
-	assert.DirExists(t, filepath.Join(targetDir, "deps"))
+	// Check hooks directory (flat, no subdirectories)
+	assert.DirExists(t, filepath.Join(targetDir, "hooks"))
 
 	// Check README
 	assert.FileExists(t, filepath.Join(targetDir, "README.md"))
@@ -52,28 +46,40 @@ func TestInit_CreatesValidConfig(t *testing.T) {
 	assert.Contains(t, configStr, "add_dot:")
 }
 
-func TestInit_CreatesDepsFiles(t *testing.T) {
+func TestInit_CreatesExampleHooks(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")
 
 	err := Init(targetDir, false)
 	require.NoError(t, err)
 
-	assert.FileExists(t, filepath.Join(targetDir, "deps", "Brewfile"))
-	assert.FileExists(t, filepath.Join(targetDir, "deps", "apt.txt"))
-}
+	// Check example hooks exist
+	assert.FileExists(t, filepath.Join(targetDir, "hooks", "hook.example.sh"))
+	assert.FileExists(t, filepath.Join(targetDir, "hooks", "homebrew.example.sh"))
 
-func TestInit_CreatesGitkeepFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	targetDir := filepath.Join(tmpDir, "dotfiles")
-
-	err := Init(targetDir, false)
+	// Check hook.example.sh content
+	hookContent, err := os.ReadFile(filepath.Join(targetDir, "hooks", "hook.example.sh"))
 	require.NoError(t, err)
+	assert.Contains(t, string(hookContent), "#!/bin/bash")
+	assert.Contains(t, string(hookContent), "pre-link")
+	assert.Contains(t, string(hookContent), "post-link")
+	assert.Contains(t, string(hookContent), "status")
 
-	assert.FileExists(t, filepath.Join(targetDir, "hooks", "pre-install", ".gitkeep"))
-	assert.FileExists(t, filepath.Join(targetDir, "hooks", "post-install", ".gitkeep"))
-	assert.FileExists(t, filepath.Join(targetDir, "hooks", "pre-link", ".gitkeep"))
-	assert.FileExists(t, filepath.Join(targetDir, "hooks", "post-link", ".gitkeep"))
+	// Check homebrew.example.sh content
+	brewContent, err := os.ReadFile(filepath.Join(targetDir, "hooks", "homebrew.example.sh"))
+	require.NoError(t, err)
+	assert.Contains(t, string(brewContent), "#!/bin/bash")
+	assert.Contains(t, string(brewContent), "DOTTIE_ROOT")
+	assert.Contains(t, string(brewContent), "brew bundle")
+
+	// Check example hooks are executable
+	hookInfo, err := os.Stat(filepath.Join(targetDir, "hooks", "hook.example.sh"))
+	require.NoError(t, err)
+	assert.True(t, hookInfo.Mode()&0111 != 0, "hook.example.sh should be executable")
+
+	brewInfo, err := os.Stat(filepath.Join(targetDir, "hooks", "homebrew.example.sh"))
+	require.NoError(t, err)
+	assert.True(t, brewInfo.Mode()&0111 != 0, "homebrew.example.sh should be executable")
 }
 
 func TestInit_CreatesExampleFiles(t *testing.T) {
@@ -128,7 +134,7 @@ func TestInit_CreatesBootstrapScript(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "#!/bin/bash")
 	assert.Contains(t, string(content), "git clone")
-	assert.Contains(t, string(content), "dottie run")
+	assert.Contains(t, string(content), "dottie link")
 
 	// Check bootstrap.sh is executable
 	info, err := os.Stat(bootstrapPath)
