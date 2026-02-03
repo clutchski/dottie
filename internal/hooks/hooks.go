@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Runner executes hook scripts.
@@ -28,18 +30,10 @@ func New(hooksDir, rootDir, homeDir string) *Runner {
 	}
 }
 
-// ANSI color codes
-const (
-	colorReset = "\033[0m"
-	colorGreen = "\033[32m"
-	colorRed   = "\033[31m"
-)
-
-// Run executes all hooks with the given phase as the first argument.
+// Run executes all hooks with the given phase in parallel.
 // Phase should be one of: "pre-link", "post-link", "status".
-// Scripts are run in alphabetical order.
 // Environment variables DOTTIE_ROOT, DOTTIE_HOME, and DOTTIE_DRY_RUN are set.
-func (r *Runner) Run(phase string, dryRun bool) error {
+func (r *Runner) Run(phase string, dryRun, verbose bool) error {
 	scripts, err := r.List()
 	if err != nil {
 		return err
@@ -49,43 +43,86 @@ func (r *Runner) Run(phase string, dryRun bool) error {
 		return nil
 	}
 
-	for _, script := range scripts {
-		if err := r.runScript(script, phase, dryRun); err != nil {
-			return fmt.Errorf("hook %s failed: %w", filepath.Base(script), err)
+	// Run all hooks in parallel
+	errors := make([]error, len(scripts))
+	var wg sync.WaitGroup
+	for i, script := range scripts {
+		wg.Add(1)
+		go func(idx int, path string) {
+			defer wg.Done()
+			name := filepath.Base(path)
+			if verbose {
+				fmt.Printf("[hook] [start] %s\n", name)
+			}
+			start := time.Now()
+			if err := r.runScript(path, phase, dryRun); err != nil {
+				errors[idx] = fmt.Errorf("hook %s failed: %w", name, err)
+			}
+			if verbose {
+				fmt.Printf("[hook] [done]  [%.1fs] %s\n", time.Since(start).Seconds(), name)
+			}
+		}(i, script)
+	}
+	wg.Wait()
+
+	// Return first error if any
+	for _, err := range errors {
+		if err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-// RunStatus executes all hooks with "status" phase and formats output.
-// Hooks return exit code 0 for ok, non-zero for needs update.
-// Returns true if all hooks are ok.
-func (r *Runner) RunStatus() (bool, error) {
-	scripts, err := r.List()
-	if err != nil {
-		return false, err
-	}
+// HookStatus represents the status of a single hook.
+type HookStatus struct {
+	Name string
+	Ok   bool
+}
 
-	if len(scripts) == 0 {
-		return true, nil
-	}
+// StatusResult holds the results of hook status checks.
+type StatusResult struct {
+	Hooks []HookStatus
+	Err   error
+}
 
-	fmt.Println("Hooks:")
-	allOk := true
-	for _, script := range scripts {
-		name := filepath.Base(script)
+// StartStatusCheck begins running all hooks with "status" phase in parallel.
+// Returns a channel that will receive the results when complete.
+func (r *Runner) StartStatusCheck() <-chan StatusResult {
+	ch := make(chan StatusResult, 1)
 
-		ok := r.runStatusScript(script)
-		if ok {
-			fmt.Printf("  %s[✓]%s %s\n", colorGreen, colorReset, name)
-		} else {
-			fmt.Printf("  %s[x]%s %s\n", colorRed, colorReset, name)
-			allOk = false
+	go func() {
+		scripts, err := r.List()
+		if err != nil {
+			ch <- StatusResult{Err: err}
+			return
 		}
-	}
 
-	return allOk, nil
+		if len(scripts) == 0 {
+			ch <- StatusResult{Hooks: nil}
+			return
+		}
+
+		// Run all hooks in parallel
+		statuses := make([]HookStatus, len(scripts))
+		var wg sync.WaitGroup
+		for i, script := range scripts {
+			wg.Add(1)
+			go func(idx int, path string) {
+				defer wg.Done()
+				statuses[idx] = HookStatus{
+					Name: filepath.Base(path),
+					Ok:   r.runStatusScript(path),
+				}
+			}(i, script)
+		}
+		wg.Wait()
+
+		ch <- StatusResult{Hooks: statuses}
+	}()
+
+	return ch
 }
 
 // List returns all active hook scripts (executable, non-hidden, non-example),
@@ -150,7 +187,6 @@ func (r *Runner) runScript(path, phase string, dryRun bool) error {
 	cmd := exec.Command(path, phase)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
 
 	// Set environment variables
 	cmd.Env = append(os.Environ(),

@@ -19,6 +19,13 @@ var (
 	date    = "unknown"
 )
 
+// ANSI color codes
+const (
+	colorReset = "\033[0m"
+	colorGreen = "\033[32m"
+	colorRed   = "\033[31m"
+)
+
 // SetVersion sets version info (called from main).
 func SetVersion(v, c, d string) {
 	version = v
@@ -71,14 +78,7 @@ Commands:
 
 Options:
   -n, --dry-run  Preview changes without making them
-  -f, --force    Overwrite existing files without backup
-
-Examples:
-  dottie init ~/dotfiles
-  dottie run -n
-  dottie hooks list
-  dottie hooks run pre-link
-  dottie status`)
+  -f, --force    Overwrite existing files without backup`)
 }
 
 func printVersion() {
@@ -131,7 +131,7 @@ func runRun(args []string) int {
 	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
 
 	// Run pre-link hooks
-	if hookErr := hookRunner.Run("pre-link", *dryRun); hookErr != nil {
+	if hookErr := hookRunner.Run("pre-link", *dryRun, *verbose); hookErr != nil {
 		fmt.Fprintf(os.Stderr, "Error running pre-link hooks: %v\n", hookErr)
 		return 1
 	}
@@ -160,7 +160,7 @@ func runRun(args []string) int {
 			case link.StatusWouldLink:
 				prefix = "[would link]"
 			case link.StatusAlreadyLinked:
-				prefix = "[ok]        "
+				prefix = "[link]      "
 			case link.StatusSkipped:
 				prefix = "[skipped]   "
 			case link.StatusError:
@@ -174,7 +174,7 @@ func runRun(args []string) int {
 	}
 
 	// Run post-link hooks
-	if err := hookRunner.Run("post-link", *dryRun); err != nil {
+	if err := hookRunner.Run("post-link", *dryRun, *verbose); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running post-link hooks: %v\n", err)
 		return 1
 	}
@@ -246,6 +246,8 @@ func runHooksRun(args []string) int {
 	fs := flag.NewFlagSet("hooks run", flag.ExitOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
 	fs.BoolVar(dryRun, "dry-run", false, "dry-run")
+	verbose := fs.Bool("v", false, "verbose")
+	fs.BoolVar(verbose, "verbose", false, "verbose")
 	_ = fs.Parse(args)
 
 	if fs.NArg() < 1 {
@@ -268,7 +270,7 @@ func runHooksRun(args []string) int {
 	cwd, _ := os.Getwd()
 	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
 
-	if err := hookRunner.Run(phase, *dryRun); err != nil {
+	if err := hookRunner.Run(phase, *dryRun, *verbose); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running %s hooks: %v\n", phase, err)
 		return 1
 	}
@@ -283,6 +285,12 @@ func runStatus(args []string) int {
 		return 1
 	}
 
+	// Start hooks first (they're slower)
+	cwd, _ := os.Getwd()
+	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hooksChan := hookRunner.StartStatusCheck()
+
+	// Print dotfiles status while hooks run
 	checker := status.New(cfg)
 	allOk, err := checker.Print()
 	if err != nil {
@@ -290,13 +298,24 @@ func runStatus(args []string) int {
 		return 1
 	}
 
-	// Run status hooks
-	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
-	hooksOk, err := hookRunner.RunStatus()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error running status hooks: %v\n", err)
+	// Wait for hooks and print results
+	hookResult := <-hooksChan
+	if hookResult.Err != nil {
+		fmt.Fprintf(os.Stderr, "Error running status hooks: %v\n", hookResult.Err)
 		return 1
+	}
+
+	hooksOk := true
+	if len(hookResult.Hooks) > 0 {
+		fmt.Println("hooks:")
+		for _, h := range hookResult.Hooks {
+			if h.Ok {
+				fmt.Printf("  %s[✓]%s %s\n", colorGreen, colorReset, h.Name)
+			} else {
+				fmt.Printf("  %s[x]%s %s\n", colorRed, colorReset, h.Name)
+				hooksOk = false
+			}
+		}
 	}
 
 	if !allOk || !hooksOk {

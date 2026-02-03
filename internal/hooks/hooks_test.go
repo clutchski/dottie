@@ -25,7 +25,7 @@ echo "first:$1" >> `+outputFile), 0755))
 echo "second:$1" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false)
+	err := runner.Run("pre-link", false, false)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -46,9 +46,9 @@ echo "$1" >> `+outputFile), 0755))
 	runner := New(hooksDir, tmpDir, "/home/test")
 
 	// Test different phases
-	require.NoError(t, runner.Run("pre-link", false))
-	require.NoError(t, runner.Run("post-link", false))
-	require.NoError(t, runner.Run("status", false))
+	require.NoError(t, runner.Run("pre-link", false, false))
+	require.NoError(t, runner.Run("post-link", false, false))
+	require.NoError(t, runner.Run("status", false, false))
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ echo "HOME=$DOTTIE_HOME" >> `+outputFile+`
 echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, "/my/dotfiles", "/home/user")
-	err := runner.Run("pre-link", false)
+	err := runner.Run("pre-link", false, false)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -90,7 +90,7 @@ func TestRun_DryRunSetsEnvVar(t *testing.T) {
 echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", true) // dry-run
+	err := runner.Run("pre-link", true, false) // dry-run
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -102,7 +102,7 @@ func TestRun_SkipsMissingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	runner := New(filepath.Join(tmpDir, "nonexistent"), tmpDir, "/home/test")
-	err := runner.Run("pre-link", false)
+	err := runner.Run("pre-link", false, false)
 	require.NoError(t, err) // Should not error on missing dir
 }
 
@@ -123,7 +123,7 @@ echo "hidden" >> `+outputFile), 0755))
 echo "normal" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false)
+	err := runner.Run("pre-link", false, false)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -148,7 +148,7 @@ echo "example" >> `+outputFile), 0755))
 echo "normal" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false)
+	err := runner.Run("pre-link", false, false)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -172,7 +172,7 @@ func TestRun_SkipsNonExecutableFiles(t *testing.T) {
 echo "exec" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false)
+	err := runner.Run("pre-link", false, false)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -210,7 +210,7 @@ func TestList_MissingDirectory(t *testing.T) {
 	assert.Empty(t, hooks)
 }
 
-func TestRunStatus_AllOk(t *testing.T) {
+func TestStartStatusCheck_AllOk(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
@@ -220,12 +220,13 @@ func TestRunStatus_AllOk(t *testing.T) {
 exit 0`), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	allOk, err := runner.RunStatus()
-	require.NoError(t, err)
-	assert.True(t, allOk)
+	result := <-runner.StartStatusCheck()
+	require.NoError(t, result.Err)
+	require.Len(t, result.Hooks, 1)
+	assert.True(t, result.Hooks[0].Ok)
 }
 
-func TestRunStatus_SomeFailed(t *testing.T) {
+func TestStartStatusCheck_SomeFailed(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
@@ -237,27 +238,29 @@ exit 0`), 0755))
 exit 1`), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	allOk, err := runner.RunStatus()
-	require.NoError(t, err)
-	assert.False(t, allOk)
+	result := <-runner.StartStatusCheck()
+	require.NoError(t, result.Err)
+	require.Len(t, result.Hooks, 2)
+	assert.True(t, result.Hooks[0].Ok)
+	assert.False(t, result.Hooks[1].Ok)
 }
 
-func TestRunStatus_EmptyDirectory(t *testing.T) {
+func TestStartStatusCheck_EmptyDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	allOk, err := runner.RunStatus()
-	require.NoError(t, err)
-	assert.True(t, allOk) // No hooks means all ok
+	result := <-runner.StartStatusCheck()
+	require.NoError(t, result.Err)
+	assert.Empty(t, result.Hooks)
 }
 
-func TestRunStatus_MissingDirectory(t *testing.T) {
+func TestStartStatusCheck_MissingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	runner := New(filepath.Join(tmpDir, "nonexistent"), tmpDir, "/home/test")
-	allOk, err := runner.RunStatus()
-	require.NoError(t, err)
-	assert.True(t, allOk) // No hooks directory means all ok
+	result := <-runner.StartStatusCheck()
+	require.NoError(t, result.Err)
+	assert.Empty(t, result.Hooks)
 }

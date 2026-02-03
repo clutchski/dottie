@@ -35,7 +35,7 @@ dottie init
 This creates:
 - `dottie.yaml` - configuration file
 - `home/` - put your dotfiles here (without the leading dot)
-- `hooks/` - scripts to run before/after linking
+- `hooks/` - scripts to run before or after linking dotfiles
 - `README.md` - with bootstrap instructions
 
 ### Add Your Dotfiles
@@ -154,7 +154,9 @@ ignore:
 
 ## Hooks
 
-Hooks are executable scripts in the `hooks/` directory. Each script receives the phase as its first argument (`pre-link`, `post-link`, or `status`).
+Hooks let you run custom scripts for tasks beyond symlinking dotfiles: installing packages (Homebrew, apt), setting up plugins (vim, zsh), configuring tools, and more.
+
+Hooks are executable scripts in the `hooks/` directory. Each script receives the phase as its first argument (`pre-link`, `post-link`, or `status`). Hooks are executed in parallel (starting in alphabetical order).
 
 **Environment variables available to hooks:**
 - `DOTTIE_ROOT` - path to the dotfiles repository
@@ -164,31 +166,29 @@ Hooks are executable scripts in the `hooks/` directory. Each script receives the
 **Phases:**
 - `pre-link` - runs before symlinking (install packages here)
 - `post-link` - runs after symlinking (source configs, run setup)
-- `status` - runs during `dottie status` (show package status)
+- `status` - exit 0 if ok, exit non-zero if needs update
 
 **Example hook:**
 
 ```bash
 #!/bin/bash
-# hooks/01-brew.sh
+# hooks/01-example.sh
 
 case "$1" in
     pre-link)
-        if [[ -f "$DOTTIE_ROOT/Brewfile" ]]; then
-            brew bundle check --file="$DOTTIE_ROOT/Brewfile" 2>/dev/null || \
-                brew bundle --file="$DOTTIE_ROOT/Brewfile"
-        fi
+        touch ~/.my-setup-complete
         ;;
     status)
-        if [[ -f "$DOTTIE_ROOT/Brewfile" ]]; then
-            echo "Brewfile:"
-            brew bundle check --file="$DOTTIE_ROOT/Brewfile" --verbose 2>&1 | sed 's/^/  /'
+        if [[ -f ~/.my-setup-complete ]]; then
+            exit 0
+        else
+            exit 1
         fi
         ;;
 esac
 ```
 
-Scripts are executed in alphabetical order. Hidden files (`.foo`) and example files (`*.example.sh`) are skipped.
+Hidden files (`.foo`) and example files (`*.example.sh`) are skipped.
 
 `dottie init` creates example hooks you can enable by copying:
 ```bash

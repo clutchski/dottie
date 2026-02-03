@@ -52,46 +52,60 @@ format = "$directory$git_branch$character"
 
 const hookExampleTemplate = `#!/bin/bash
 # Example hook template
-# Copy this file: cp hooks/hook.example.sh hooks/my-hook.sh
-# Then edit my-hook.sh to add your logic
+# Copy this file: cp hooks/hook.example.sh hooks/01-my-hook.sh
+# Then edit to add your logic
+#
+# Phases:
+#   pre-link  - runs before symlinking (install dependencies here)
+#   post-link - runs after symlinking (configure tools here)
+#   status    - exit 0 if ok, exit 1 if needs update
 
 case "$1" in
     pre-link)
-        echo "Running pre-link for my-hook"
+        # Example: install a tool if missing
+        # command -v mytool &>/dev/null || install_mytool
         ;;
     post-link)
-        echo "Running post-link for my-hook"
+        # Example: configure something after dotfiles are linked
         ;;
     status)
-        echo "my-hook status: ok"
+        # Example: check if tool is installed
+        # command -v mytool &>/dev/null
+        exit 0
         ;;
 esac
 `
 
 const homebrewExampleTemplate = `#!/bin/bash
 # Homebrew package management hook
-# To enable: cp hooks/homebrew.example.sh hooks/homebrew.sh
-set -e
+# To enable: cp hooks/homebrew.example.sh hooks/01-homebrew.sh
 BREWFILE="$DOTTIE_ROOT/Brewfile"
 
 case "$1" in
     pre-link)
-        if [[ -f "$BREWFILE" ]]; then
+        # Install Homebrew if missing (macOS only)
+        if [[ "$(uname)" == "Darwin" ]] && ! command -v brew &>/dev/null; then
+            echo "Installing Homebrew..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        fi
+
+        # Install packages from Brewfile
+        if [[ -f "$BREWFILE" ]] && command -v brew &>/dev/null; then
             if [[ "$DOTTIE_DRY_RUN" == "true" ]]; then
                 echo "[dry-run] would run: brew bundle --file=$BREWFILE"
             else
-                brew bundle check --file="$BREWFILE" 2>/dev/null || brew bundle --file="$BREWFILE"
+                brew bundle check --file="$BREWFILE" &>/dev/null || brew bundle --file="$BREWFILE"
             fi
         fi
         ;;
     status)
+        # Fail if brew not installed
+        command -v brew &>/dev/null || exit 1
+
+        # Check if all packages are installed
         if [[ -f "$BREWFILE" ]]; then
-            echo "Brewfile:"
-            if brew bundle check --file="$BREWFILE" 2>/dev/null; then
-                echo "  All packages installed"
-            else
-                brew bundle check --file="$BREWFILE" --verbose 2>&1 | grep "needs to be installed" | sed 's/^/  /' || true
-            fi
+            brew bundle check --file="$BREWFILE" &>/dev/null
+            exit $?
         fi
         ;;
 esac
@@ -107,7 +121,7 @@ cd ~/.dotfiles
 
 curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/install.sh | bash
 
-dottie link
+dottie run
 `
 
 const readmeTemplate = `# %s

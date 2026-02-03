@@ -134,7 +134,7 @@ func TestInit_CreatesBootstrapScript(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "#!/bin/bash")
 	assert.Contains(t, string(content), "git clone")
-	assert.Contains(t, string(content), "dottie link")
+	assert.Contains(t, string(content), "dottie run")
 
 	// Check bootstrap.sh is executable
 	info, err := os.Stat(bootstrapPath)
