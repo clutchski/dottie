@@ -188,25 +188,6 @@ Hidden files (`.foo`) and example files (`*.example.sh`) are skipped.
 cp hooks/homebrew.example.sh hooks/homebrew.sh
 ```
 
-## Example Repository Structure
-
-```
-dotfiles/
-├── dottie.yaml
-├── Brewfile              # optional: Homebrew packages (used by hook)
-├── home/
-│   ├── vimrc           -> ~/.vimrc
-│   ├── zshrc           -> ~/.zshrc
-│   ├── tmux.conf       -> ~/.tmux.conf
-│   └── config/
-│       └── nvim/       -> ~/.config/nvim/
-├── hooks/
-│   ├── hook.example.sh         # template (skipped)
-│   ├── homebrew.example.sh     # brew hook template (skipped)
-│   └── 01-brew.sh              # your active hook
-└── README.md
-```
-
 ## Build from Source
 
 ```bash
