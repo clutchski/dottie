@@ -36,15 +36,7 @@ Dotfiles are configuration files for your tools (shell, editor, git, etc.). Copy
 cp ~/.zshrc ~/dotfiles/home/zshrc
 ```
 
-Then link it back to your home directory:
-
-```bash
-dottie run
-```
-
-This creates `~/.zshrc` as a symlink to `~/dotfiles/home/zshrc`. Now your config is version controlled.
-
-### 3. Add a Hook
+### 3. Add a Hook (Optional)
 
 Hooks run custom scripts for tasks beyond symlinking: installing packages, setting up plugins, configuring tools. Create one from the template:
 
@@ -52,21 +44,17 @@ Hooks run custom scripts for tasks beyond symlinking: installing packages, setti
 cp hooks/hook.example.sh hooks/01-setup.sh
 ```
 
-Edit it to run in `pre-link` (before symlinking), `post-link` (after), or `status` (health checks). Now `dottie run` will execute your hook.
+Edit it to run in `pre-link` (before symlinking), `post-link` (after), or `status` (health checks).
 
-### 4. Commit and Push
-
-```bash
-git add -A && git commit -m "Initial dotfiles"
-git remote add origin git@github.com:YOU/dotfiles.git
-git push -u origin main
-```
-
-### Check Status
+### 4. Run
 
 ```bash
-dottie status
+dottie run
 ```
+
+This runs your hooks, then creates symlinks (e.g., `~/.zshrc` -> `~/dotfiles/home/zshrc`).
+
+Use `dottie status` to check what's linked.
 
 ## Bootstrap a New Machine
 
