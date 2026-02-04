@@ -1,6 +1,6 @@
 # dottie
 
-A simple dotfiles manager for macOS and Linux.
+A simple dotfiles manager for macOS and Linux. Keep your dotfiles in a git repo, sync them across machines.
 
 ## Installation
 
@@ -24,7 +24,9 @@ make install
 
 ## Quick Start
 
-### Create a New Dotfiles Repo
+### 1. Initialize a Dotfiles Repo
+
+Create a git repo to store your configuration files:
 
 ```bash
 mkdir ~/dotfiles && cd ~/dotfiles
@@ -32,32 +34,40 @@ git init
 dottie init
 ```
 
-This creates:
-- `dottie.yaml` - configuration file
-- `home/` - put your dotfiles here (without the leading dot)
-- `hooks/` - scripts to run before or after linking dotfiles
-- `README.md` - with bootstrap instructions
+This creates the repo structure: `home/` for dotfiles, `hooks/` for scripts, and `dottie.yaml` for config.
 
-### Add Your Dotfiles
+### 2. Add a Dotfile
 
-Copy your dotfiles into `home/` without the leading dot:
+Dotfiles are configuration files for your tools (shell, editor, git, etc.). Copy them into `home/` without the leading dot:
 
 ```bash
-cp ~/.vimrc ~/dotfiles/home/vimrc
 cp ~/.zshrc ~/dotfiles/home/zshrc
-cp -r ~/.config/nvim ~/dotfiles/home/config/nvim
 ```
 
-### Link Dotfiles
+Then link it back to your home directory:
 
-Preview what will happen:
-```bash
-dottie run -n  # dry-run
-```
-
-Create the symlinks:
 ```bash
 dottie run
+```
+
+This creates `~/.zshrc` as a symlink to `~/dotfiles/home/zshrc`. Now your config is version controlled.
+
+### 3. Add a Hook
+
+Hooks run custom scripts for tasks beyond symlinking: installing packages, setting up plugins, configuring tools. Enable the Homebrew hook:
+
+```bash
+cp hooks/homebrew.example.sh hooks/homebrew.sh
+```
+
+Now `dottie run` will install your Brewfile packages before linking dotfiles.
+
+### 4. Commit and Push
+
+```bash
+git add -A && git commit -m "Initial dotfiles"
+git remote add origin git@github.com:YOU/dotfiles.git
+git push -u origin main
 ```
 
 ### Check Status
