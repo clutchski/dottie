@@ -318,61 +318,78 @@ const (
 	colorGray   = "\033[90m"
 )
 
-// Print prints the status to stdout.
-func (c *Checker) Print() error {
+// Check returns true if all dotfiles are in sync, false otherwise.
+// Also returns the list of statuses for display.
+func (c *Checker) Check() (bool, []DotfileStatus, error) {
 	statuses, err := c.GetStatusScan()
 	if err != nil {
-		return err
+		return false, nil, err
 	}
 
-	if len(statuses) == 0 {
-		fmt.Println("No dotfiles found")
-		return nil
-	}
-
-	// Calculate max width for target path
-	maxTargetLen := 0
+	allOk := true
 	for _, s := range statuses {
-		displayTarget := c.formatTargetPath(s.TargetPath)
-		if len(displayTarget) > maxTargetLen {
-			maxTargetLen = len(displayTarget)
+		if s.Status != FileStatusLinked {
+			allOk = false
+			break
 		}
 	}
 
+	return allOk, statuses, nil
+}
+
+// Print prints the status to stdout.
+// Returns true if all dotfiles are in sync.
+func (c *Checker) Print() (bool, error) {
+	allOk, statuses, err := c.Check()
+	if err != nil {
+		return false, err
+	}
+
+	if len(statuses) == 0 {
+		return true, nil
+	}
+
+	// Calculate max target width for alignment
+	maxWidth := 0
 	for _, s := range statuses {
-		var code, label, color string
+		displayTarget := c.formatTargetPath(s.TargetPath)
+		if len(displayTarget) > maxWidth {
+			maxWidth = len(displayTarget)
+		}
+	}
+
+	fmt.Println("Dotfiles:")
+	for _, s := range statuses {
+		var symbol, color, reason string
 		switch s.Status {
 		case FileStatusLinked:
-			code = "  "
-			label = "ok"
+			symbol = "✓"
 			color = colorGreen
 		case FileStatusMissing:
-			code = "! "
-			label = "unlinked"
+			symbol = "x"
 			color = colorRed
+			reason = "(not linked)"
 		case FileStatusDiff:
-			code = "!!"
-			label = "conflict"
+			symbol = "!"
 			color = colorYellow
+			reason = "(" + s.Message + ")"
 		case FileStatusUntracked:
-			code = "??"
-			label = "untracked"
+			symbol = "?"
 			color = colorGray
+			reason = "(not in repo)"
 		}
 
 		displayTarget := c.formatTargetPath(s.TargetPath)
 		displaySource := c.formatSourcePath(s.SourcePath)
 
-		if s.Status == FileStatusUntracked {
-			fmt.Printf("%s%s %-9s%s %s\n", color, code, label, colorReset, displayTarget)
+		if reason != "" {
+			fmt.Printf("  %s[%s]%s %-*s  %s%s%s\n", color, symbol, colorReset, maxWidth, displayTarget, color, reason, colorReset)
 		} else {
-			fmt.Printf("%s%s %-9s%s %-*s -> %s\n",
-				color, code, label, colorReset,
-				maxTargetLen, displayTarget, displaySource)
+			fmt.Printf("  %s[%s]%s %-*s -> %s\n", color, symbol, colorReset, maxWidth, displayTarget, displaySource)
 		}
 	}
 
-	return nil
+	return allOk, nil
 }
 
 // formatTargetPath formats the target path for display (replaces HOME with ~ only if target is HOME).
@@ -389,15 +406,14 @@ func (c *Checker) formatTargetPath(path string) string {
 
 // formatSourcePath formats the source path for display (relative to repo root).
 func (c *Checker) formatSourcePath(path string) string {
-	sourceDir := c.cfg.GetSourcePath()
-	repoRoot := c.cfg.RepoRoot()
-
-	// Try to make it relative to source dir first, then repo root
-	if rel, err := filepath.Rel(repoRoot, path); err == nil {
-		return rel
+	cwd, err := os.Getwd()
+	if err != nil {
+		return path
 	}
-	if rel, err := filepath.Rel(sourceDir, path); err == nil {
-		return rel
+	rel, err := filepath.Rel(cwd, path)
+	if err != nil {
+		return path
 	}
-	return path
+	return rel
 }
+

@@ -35,8 +35,7 @@ dottie init
 This creates:
 - `dottie.yaml` - configuration file
 - `home/` - put your dotfiles here (without the leading dot)
-- `hooks/` - scripts to run before/after install and link
-- `deps/` - dependency files (Brewfile, apt.txt)
+- `hooks/` - scripts to run before or after linking dotfiles
 - `README.md` - with bootstrap instructions
 
 ### Add Your Dotfiles
@@ -53,12 +52,12 @@ cp -r ~/.config/nvim ~/dotfiles/home/config/nvim
 
 Preview what will happen:
 ```bash
-dottie link -n  # dry-run
+dottie run -n  # dry-run
 ```
 
 Create the symlinks:
 ```bash
-dottie link
+dottie run
 ```
 
 ### Check Status
@@ -89,37 +88,38 @@ dottie init ~/dotfiles   # specific directory
 dottie init -n           # dry-run
 ```
 
-### `dottie link`
+### `dottie run`
 
-Create symlinks from your dotfiles repo to your home directory.
+Run hooks and create symlinks from your dotfiles repo to your home directory. Runs pre-link hooks, creates symlinks, then runs post-link hooks.
 
 ```bash
-dottie link              # create symlinks
-dottie link -n           # dry-run (show what would happen)
-dottie link -f           # force (overwrite existing files)
+dottie run              # create symlinks
+dottie run -n           # dry-run (show what would happen)
+dottie run -f           # force (overwrite existing files)
 ```
 
-### `dottie install`
+### `dottie hooks list`
 
-Install packages from `deps/Brewfile` (macOS) or `deps/apt.txt` (Linux).
+List active hooks (executable files in `hooks/` that are not hidden or example files).
 
 ```bash
-dottie install           # install packages
-dottie install -n        # dry-run
+dottie hooks list
 ```
 
-### `dottie run <hook>`
+### `dottie hooks run <phase>`
 
-Run scripts from a hooks directory.
+Run hooks for a specific phase without linking.
 
 ```bash
-dottie run post-install  # run all scripts in hooks/post-install/
-dottie run pre-link -n   # dry-run
+dottie hooks run pre-link   # run pre-link hooks only
+dottie hooks run post-link  # run post-link hooks only
+dottie hooks run status     # run status hooks only
+dottie hooks run pre-link -n  # dry-run
 ```
 
 ### `dottie status`
 
-Show the status of your dotfiles (linked, missing, conflicts).
+Show the status of your dotfiles (linked, missing, conflicts), then runs status hooks.
 
 ```bash
 dottie status
@@ -154,20 +154,53 @@ ignore:
 
 ## Hooks
 
-Place executable scripts in the hooks directories:
+Hooks let you run custom scripts for tasks beyond symlinking dotfiles: installing packages (Homebrew, apt), setting up plugins (vim, zsh), configuring tools, and more.
 
-- `hooks/pre-install/` - run before `dottie install`
-- `hooks/post-install/` - run after `dottie install`
-- `hooks/pre-link/` - run before `dottie link`
-- `hooks/post-link/` - run after `dottie link`
+Hooks are executable scripts in the `hooks/` directory. Each script receives the phase as its first argument (`pre-link`, `post-link`, or `status`). Hooks are executed in parallel (starting in alphabetical order).
 
-Scripts are executed in alphabetical order.
+**Environment variables available to hooks:**
+- `DOTTIE_ROOT` - path to the dotfiles repository
+- `DOTTIE_HOME` - target home directory
+- `DOTTIE_DRY_RUN` - "true" or "false"
+
+**Phases:**
+- `pre-link` - runs before symlinking (install packages here)
+- `post-link` - runs after symlinking (source configs, run setup)
+- `status` - exit 0 if ok, exit non-zero if needs update
+
+**Example hook:**
+
+```bash
+#!/bin/bash
+# hooks/01-example.sh
+
+case "$1" in
+    pre-link)
+        touch ~/.my-setup-complete
+        ;;
+    status)
+        if [[ -f ~/.my-setup-complete ]]; then
+            exit 0
+        else
+            exit 1
+        fi
+        ;;
+esac
+```
+
+Hidden files (`.foo`) and example files (`*.example.sh`) are skipped.
+
+`dottie init` creates example hooks you can enable by copying:
+```bash
+cp hooks/homebrew.example.sh hooks/homebrew.sh
+```
 
 ## Example Repository Structure
 
 ```
 dotfiles/
 ├── dottie.yaml
+├── Brewfile              # optional: Homebrew packages (used by hook)
 ├── home/
 │   ├── vimrc           -> ~/.vimrc
 │   ├── zshrc           -> ~/.zshrc
@@ -175,15 +208,9 @@ dotfiles/
 │   └── config/
 │       └── nvim/       -> ~/.config/nvim/
 ├── hooks/
-│   ├── pre-install/
-│   ├── post-install/
-│   │   └── 01-setup-fzf.sh
-│   ├── pre-link/
-│   └── post-link/
-│       └── 01-source-zshrc.sh
-├── deps/
-│   ├── Brewfile        # macOS packages
-│   └── apt.txt         # Linux packages
+│   ├── hook.example.sh         # template (skipped)
+│   ├── homebrew.example.sh     # brew hook template (skipped)
+│   └── 01-brew.sh              # your active hook
 └── README.md
 ```
 

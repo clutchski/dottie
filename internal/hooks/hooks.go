@@ -6,48 +6,35 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
+	"time"
 )
-
-// HookType represents when a hook runs.
-type HookType int
-
-const (
-	PreInstall HookType = iota
-	PostInstall
-	PreLink
-	PostLink
-)
-
-func (h HookType) String() string {
-	switch h {
-	case PreInstall:
-		return "pre-install"
-	case PostInstall:
-		return "post-install"
-	case PreLink:
-		return "pre-link"
-	case PostLink:
-		return "post-link"
-	default:
-		return "unknown"
-	}
-}
 
 // Runner executes hook scripts.
 type Runner struct {
 	hooksDir string
+	rootDir  string
+	homeDir  string
 }
 
 // New creates a new hook Runner.
-func New(hooksDir string) *Runner {
-	return &Runner{hooksDir: hooksDir}
+// hooksDir is the path to the hooks directory.
+// rootDir is the dotfiles repository root (set as DOTTIE_ROOT).
+// homeDir is the target home directory (set as DOTTIE_HOME).
+func New(hooksDir, rootDir, homeDir string) *Runner {
+	return &Runner{
+		hooksDir: hooksDir,
+		rootDir:  rootDir,
+		homeDir:  homeDir,
+	}
 }
 
-// Run executes all scripts for the given hook type.
-// Scripts are run in alphabetical order.
-// If dryRun is true, scripts are listed but not executed.
-func (r *Runner) Run(hookType HookType, dryRun bool) error {
-	scripts, err := r.ListScripts(hookType)
+// Run executes all hooks with the given phase in parallel.
+// Phase should be one of: "pre-link", "post-link", "status".
+// Environment variables DOTTIE_ROOT, DOTTIE_HOME, and DOTTIE_DRY_RUN are set.
+func (r *Runner) Run(phase string, dryRun, verbose bool) error {
+	scripts, err := r.List()
 	if err != nil {
 		return err
 	}
@@ -56,30 +43,96 @@ func (r *Runner) Run(hookType HookType, dryRun bool) error {
 		return nil
 	}
 
-	for _, script := range scripts {
-		if dryRun {
-			fmt.Printf("[dry-run] would run: %s\n", script)
-			continue
-		}
+	// Run all hooks in parallel
+	errors := make([]error, len(scripts))
+	var wg sync.WaitGroup
+	for i, script := range scripts {
+		wg.Add(1)
+		go func(idx int, path string) {
+			defer wg.Done()
+			name := filepath.Base(path)
+			if verbose {
+				fmt.Printf("[hook] [start] %s\n", name)
+			}
+			start := time.Now()
+			if err := r.runScript(path, phase, dryRun); err != nil {
+				errors[idx] = fmt.Errorf("hook %s failed: %w", name, err)
+			}
+			if verbose {
+				fmt.Printf("[hook] [done]  [%.1fs] %s\n", time.Since(start).Seconds(), name)
+			}
+		}(i, script)
+	}
+	wg.Wait()
 
-		if err := r.runScript(script); err != nil {
-			return fmt.Errorf("hook %s failed: %w", filepath.Base(script), err)
+	// Return first error if any
+	for _, err := range errors {
+		if err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-// ListScripts returns all executable scripts for the given hook type,
-// sorted alphabetically.
-func (r *Runner) ListScripts(hookType HookType) ([]string, error) {
-	hookDir := filepath.Join(r.hooksDir, hookType.String())
+// HookStatus represents the status of a single hook.
+type HookStatus struct {
+	Name string
+	Ok   bool
+}
 
-	if _, err := os.Stat(hookDir); os.IsNotExist(err) {
+// StatusResult holds the results of hook status checks.
+type StatusResult struct {
+	Hooks []HookStatus
+	Err   error
+}
+
+// StartStatusCheck begins running all hooks with "status" phase in parallel.
+// Returns a channel that will receive the results when complete.
+func (r *Runner) StartStatusCheck() <-chan StatusResult {
+	ch := make(chan StatusResult, 1)
+
+	go func() {
+		scripts, err := r.List()
+		if err != nil {
+			ch <- StatusResult{Err: err}
+			return
+		}
+
+		if len(scripts) == 0 {
+			ch <- StatusResult{Hooks: nil}
+			return
+		}
+
+		// Run all hooks in parallel
+		statuses := make([]HookStatus, len(scripts))
+		var wg sync.WaitGroup
+		for i, script := range scripts {
+			wg.Add(1)
+			go func(idx int, path string) {
+				defer wg.Done()
+				statuses[idx] = HookStatus{
+					Name: filepath.Base(path),
+					Ok:   r.runStatusScript(path),
+				}
+			}(i, script)
+		}
+		wg.Wait()
+
+		ch <- StatusResult{Hooks: statuses}
+	}()
+
+	return ch
+}
+
+// List returns all active hook scripts (executable, non-hidden, non-example),
+// sorted alphabetically.
+func (r *Runner) List() ([]string, error) {
+	if _, err := os.Stat(r.hooksDir); os.IsNotExist(err) {
 		return nil, nil
 	}
 
-	entries, err := os.ReadDir(hookDir)
+	entries, err := os.ReadDir(r.hooksDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read hooks directory: %w", err)
 	}
@@ -91,12 +144,18 @@ func (r *Runner) ListScripts(hookType HookType) ([]string, error) {
 		}
 
 		name := entry.Name()
+
 		// Skip hidden files (like .gitkeep)
-		if name[0] == '.' {
+		if strings.HasPrefix(name, ".") {
 			continue
 		}
 
-		path := filepath.Join(hookDir, name)
+		// Skip example files (like hook.example.sh)
+		if strings.HasSuffix(name, ".example.sh") {
+			continue
+		}
+
+		path := filepath.Join(r.hooksDir, name)
 		if !isExecutable(path) {
 			continue
 		}
@@ -108,11 +167,33 @@ func (r *Runner) ListScripts(hookType HookType) ([]string, error) {
 	return scripts, nil
 }
 
-func (r *Runner) runScript(path string) error {
-	cmd := exec.Command(path)
+// runStatusScript runs a hook with "status" phase silently and returns true if exit code is 0.
+func (r *Runner) runStatusScript(path string) bool {
+	cmd := exec.Command(path, "status")
+
+	// Set environment variables
+	cmd.Env = append(os.Environ(),
+		"DOTTIE_ROOT="+r.rootDir,
+		"DOTTIE_HOME="+r.homeDir,
+		"DOTTIE_DRY_RUN=false",
+	)
+
+	// Run silently - we only care about exit code
+	err := cmd.Run()
+	return err == nil
+}
+
+func (r *Runner) runScript(path, phase string, dryRun bool) error {
+	cmd := exec.Command(path, phase)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+
+	// Set environment variables
+	cmd.Env = append(os.Environ(),
+		"DOTTIE_ROOT="+r.rootDir,
+		"DOTTIE_HOME="+r.homeDir,
+		"DOTTIE_DRY_RUN="+boolToString(dryRun),
+	)
 
 	return cmd.Run()
 }
@@ -125,4 +206,11 @@ func isExecutable(path string) bool {
 
 	// Check if any execute bit is set
 	return info.Mode()&0111 != 0
+}
+
+func boolToString(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }

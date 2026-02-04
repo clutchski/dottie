@@ -9,16 +9,21 @@ import (
 	"github.com/clutchski/dottie/internal/config"
 	"github.com/clutchski/dottie/internal/hooks"
 	dotinit "github.com/clutchski/dottie/internal/init"
-	"github.com/clutchski/dottie/internal/install"
 	"github.com/clutchski/dottie/internal/link"
 	"github.com/clutchski/dottie/internal/status"
-	"github.com/clutchski/dottie/internal/util"
 )
 
 var (
 	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
+)
+
+// ANSI color codes
+const (
+	colorReset = "\033[0m"
+	colorGreen = "\033[32m"
+	colorRed   = "\033[31m"
 )
 
 // SetVersion sets version info (called from main).
@@ -38,12 +43,10 @@ func Run(args []string) int {
 	switch args[0] {
 	case "init":
 		return runInit(args[1:])
-	case "link":
-		return runLink(args[1:])
-	case "install":
-		return runInstall(args[1:])
 	case "run":
 		return runRun(args[1:])
+	case "hooks":
+		return runHooks(args[1:])
 	case "status":
 		return runStatus(args[1:])
 	case "version", "--version", "-v":
@@ -67,21 +70,15 @@ Usage:
 
 Commands:
   init [dir]     Initialize a new dotfiles repository
-  link           Symlink dotfiles to home directory
-  install        Install packages (brew/apt)
-  run            Run install + link
+  run            Run hooks and symlink dotfiles to home directory
+  hooks          Manage hooks (list, run)
   status         Show status of dotfiles
   version        Show version information
   help           Show this help message
 
 Options:
   -n, --dry-run  Preview changes without making them
-  -f, --force    Overwrite existing files without backup (link only)
-
-Examples:
-  dottie init ~/dotfiles
-  dottie link -n
-  dottie status`)
+  -f, --force    Overwrite existing files without backup`)
 }
 
 func printVersion() {
@@ -114,7 +111,7 @@ func runInit(args []string) int {
 	return 0
 }
 
-func runLink(args []string) int {
+func runRun(args []string) int {
 	fs := flag.NewFlagSet("link", flag.ExitOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
 	fs.BoolVar(dryRun, "dry-run", false, "dry-run")
@@ -130,9 +127,11 @@ func runLink(args []string) int {
 		return 1
 	}
 
+	cwd, _ := os.Getwd()
+	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+
 	// Run pre-link hooks
-	hookRunner := hooks.New(cfg.GetHooksPath())
-	if hookErr := hookRunner.Run(hooks.PreLink, *dryRun); hookErr != nil {
+	if hookErr := hookRunner.Run("pre-link", *dryRun, *verbose); hookErr != nil {
 		fmt.Fprintf(os.Stderr, "Error running pre-link hooks: %v\n", hookErr)
 		return 1
 	}
@@ -161,7 +160,7 @@ func runLink(args []string) int {
 			case link.StatusWouldLink:
 				prefix = "[would link]"
 			case link.StatusAlreadyLinked:
-				prefix = "[ok]        "
+				prefix = "[link]      "
 			case link.StatusSkipped:
 				prefix = "[skipped]   "
 			case link.StatusError:
@@ -175,7 +174,7 @@ func runLink(args []string) int {
 	}
 
 	// Run post-link hooks
-	if err := hookRunner.Run(hooks.PostLink, *dryRun); err != nil {
+	if err := hookRunner.Run("post-link", *dryRun, *verbose); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running post-link hooks: %v\n", err)
 		return 1
 	}
@@ -183,11 +182,84 @@ func runLink(args []string) int {
 	return 0
 }
 
-func runInstall(args []string) int {
-	fs := flag.NewFlagSet("install", flag.ExitOnError)
+func runHooks(args []string) int {
+	if len(args) < 1 {
+		printHooksUsage()
+		return 1
+	}
+
+	switch args[0] {
+	case "list":
+		return runHooksList(args[1:])
+	case "run":
+		return runHooksRun(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown hooks subcommand: %s\n", args[0])
+		printHooksUsage()
+		return 1
+	}
+}
+
+func printHooksUsage() {
+	fmt.Println(`Usage: dottie hooks <subcommand>
+
+Subcommands:
+  list           List active hooks
+  run <phase>    Run hooks for a phase (pre-link, post-link, status)
+
+Examples:
+  dottie hooks list
+  dottie hooks run pre-link
+  dottie hooks run status`)
+}
+
+func runHooksList(args []string) int {
+	cfg, err := loadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	cwd, _ := os.Getwd()
+	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+
+	hooksList, err := hookRunner.List()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	if len(hooksList) == 0 {
+		fmt.Println("No active hooks found")
+		return 0
+	}
+
+	fmt.Println("Active hooks:")
+	for _, h := range hooksList {
+		fmt.Printf("  %s\n", filepath.Base(h))
+	}
+
+	return 0
+}
+
+func runHooksRun(args []string) int {
+	fs := flag.NewFlagSet("hooks run", flag.ExitOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
 	fs.BoolVar(dryRun, "dry-run", false, "dry-run")
+	verbose := fs.Bool("v", false, "verbose")
+	fs.BoolVar(verbose, "verbose", false, "verbose")
 	_ = fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "Error: phase argument required (pre-link, post-link, status)")
+		return 1
+	}
+
+	phase := fs.Arg(0)
+	if phase != "pre-link" && phase != "post-link" && phase != "status" {
+		fmt.Fprintf(os.Stderr, "Error: invalid phase %q (must be pre-link, post-link, or status)\n", phase)
+		return 1
+	}
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -195,69 +267,12 @@ func runInstall(args []string) int {
 		return 1
 	}
 
-	// Run pre-install hooks
-	hookRunner := hooks.New(cfg.GetHooksPath())
-	if err := hookRunner.Run(hooks.PreInstall, *dryRun); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running pre-install hooks: %v\n", err)
+	cwd, _ := os.Getwd()
+	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+
+	if err := hookRunner.Run(phase, *dryRun, *verbose); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running %s hooks: %v\n", phase, err)
 		return 1
-	}
-
-	// Install packages
-	installer := install.New(cfg.GetDepsPath())
-	osName := util.DetectOS()
-
-	if *dryRun {
-		packages, err := installer.ListPackages(osName)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return 1
-		}
-		fmt.Printf("[dry-run] would install %d packages for %s\n", len(packages), osName)
-		for _, p := range packages {
-			fmt.Printf("  - %s\n", p)
-		}
-	} else {
-		if err := installer.Install(osName, *dryRun); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return 1
-		}
-	}
-
-	// Run post-install hooks
-	if err := hookRunner.Run(hooks.PostInstall, *dryRun); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running post-install hooks: %v\n", err)
-		return 1
-	}
-
-	return 0
-}
-
-func runRun(args []string) int {
-	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	dryRun := fs.Bool("n", false, "dry-run")
-	fs.BoolVar(dryRun, "dry-run", false, "dry-run")
-	_ = fs.Parse(args)
-
-	// Run install
-	fmt.Println("==> Installing packages...")
-	installArgs := []string{}
-	if *dryRun {
-		installArgs = append(installArgs, "-n")
-	}
-	if code := runInstall(installArgs); code != 0 {
-		return code
-	}
-
-	fmt.Println()
-
-	// Run link
-	fmt.Println("==> Linking dotfiles...")
-	linkArgs := []string{}
-	if *dryRun {
-		linkArgs = append(linkArgs, "-n")
-	}
-	if code := runLink(linkArgs); code != 0 {
-		return code
 	}
 
 	return 0
@@ -270,20 +285,42 @@ func runStatus(args []string) int {
 		return 1
 	}
 
+	// Start hooks first (they're slower)
+	cwd, _ := os.Getwd()
+	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hooksChan := hookRunner.StartStatusCheck()
+
+	// Print dotfiles status while hooks run
 	checker := status.New(cfg)
-	if err := checker.Print(); err != nil {
+	allOk, err := checker.Print()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
 
-	// Print brew status on macOS
-	depsDir := cfg.GetDepsPath()
-	installer := install.New(depsDir)
-	if err := installer.PrintStatus(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	// Wait for hooks and print results
+	hookResult := <-hooksChan
+	if hookResult.Err != nil {
+		fmt.Fprintf(os.Stderr, "Error running status hooks: %v\n", hookResult.Err)
 		return 1
 	}
 
+	hooksOk := true
+	if len(hookResult.Hooks) > 0 {
+		fmt.Println("hooks:")
+		for _, h := range hookResult.Hooks {
+			if h.Ok {
+				fmt.Printf("  %s[✓]%s %s\n", colorGreen, colorReset, h.Name)
+			} else {
+				fmt.Printf("  %s[x]%s %s\n", colorRed, colorReset, h.Name)
+				hooksOk = false
+			}
+		}
+	}
+
+	if !allOk || !hooksOk {
+		return 1
+	}
 	return 0
 }
 

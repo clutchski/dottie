@@ -27,9 +27,10 @@ lint:
 fix:
 	golangci-lint run --fix
 
-# Install to $GOBIN (default: ~/go/bin)
-install:
-	go install $(LDFLAGS) $(BUILD_DIR)
+# Install to ~/.local/bin
+install: build
+	mkdir -p ~/.local/bin
+	cp $(BINARY_NAME) ~/.local/bin/
 
 # Uninstall from $GOBIN
 uninstall:

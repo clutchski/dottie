@@ -32,26 +32,6 @@ ignore:
   - LICENSE
 `
 
-const defaultBrewfile = `# Homebrew packages
-# Uncomment or add packages you want to install
-
-# brew "git"
-# brew "vim"
-# brew "tmux"
-# brew "ripgrep"
-# brew "fzf"
-`
-
-const defaultAptTxt = `# APT packages (one per line)
-# Uncomment or add packages you want to install
-
-# git
-# vim
-# tmux
-# ripgrep
-# fzf
-`
-
 const exampleShellrc = `# Example: becomes ~/.shellrc when linked
 # Replace with your actual dotfiles!
 
@@ -68,6 +48,67 @@ const exampleStarship = `# Example: becomes ~/.config/starship.toml when linked
 # Shows how to link files into directories that already exist
 
 format = "$directory$git_branch$character"
+`
+
+const hookExampleTemplate = `#!/bin/bash
+# Example hook template
+# Copy this file: cp hooks/hook.example.sh hooks/01-my-hook.sh
+# Then edit to add your logic
+#
+# Phases:
+#   pre-link  - runs before symlinking (install dependencies here)
+#   post-link - runs after symlinking (configure tools here)
+#   status    - exit 0 if ok, exit 1 if needs update
+
+case "$1" in
+    pre-link)
+        # Example: install a tool if missing
+        # command -v mytool &>/dev/null || install_mytool
+        ;;
+    post-link)
+        # Example: configure something after dotfiles are linked
+        ;;
+    status)
+        # Example: check if tool is installed
+        # command -v mytool &>/dev/null
+        exit 0
+        ;;
+esac
+`
+
+const homebrewExampleTemplate = `#!/bin/bash
+# Homebrew package management hook
+# To enable: cp hooks/homebrew.example.sh hooks/01-homebrew.sh
+BREWFILE="$DOTTIE_ROOT/Brewfile"
+
+case "$1" in
+    pre-link)
+        # Install Homebrew if missing (macOS only)
+        if [[ "$(uname)" == "Darwin" ]] && ! command -v brew &>/dev/null; then
+            echo "Installing Homebrew..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        fi
+
+        # Install packages from Brewfile
+        if [[ -f "$BREWFILE" ]] && command -v brew &>/dev/null; then
+            if [[ "$DOTTIE_DRY_RUN" == "true" ]]; then
+                echo "[dry-run] would run: brew bundle --file=$BREWFILE"
+            else
+                brew bundle check --file="$BREWFILE" &>/dev/null || brew bundle --file="$BREWFILE"
+            fi
+        fi
+        ;;
+    status)
+        # Fail if brew not installed
+        command -v brew &>/dev/null || exit 1
+
+        # Check if all packages are installed
+        if [[ -f "$BREWFILE" ]]; then
+            brew bundle check --file="$BREWFILE" &>/dev/null
+            exit $?
+        fi
+        ;;
+esac
 `
 
 const bootstrapScript = `#!/bin/bash
@@ -136,7 +177,6 @@ func Init(dir string, dryRun bool) error {
 		fmt.Printf("  %s\n", configPath)
 		fmt.Printf("  %s\n", filepath.Join(absDir, "home/"))
 		fmt.Printf("  %s\n", filepath.Join(absDir, "hooks/"))
-		fmt.Printf("  %s\n", filepath.Join(absDir, "deps/"))
 		fmt.Printf("  %s\n", filepath.Join(absDir, "README.md"))
 		return nil
 	}
@@ -178,38 +218,20 @@ func Init(dir string, dryRun bool) error {
 		return fmt.Errorf("failed to create example starship.toml: %w", err)
 	}
 
-	// Create hooks directories
-	hookDirs := []string{
-		"hooks/pre-install",
-		"hooks/post-install",
-		"hooks/pre-link",
-		"hooks/post-link",
-	}
-	for _, hookDir := range hookDirs {
-		hookPath := filepath.Join(absDir, hookDir)
-		if err := os.MkdirAll(hookPath, 0755); err != nil {
-			return fmt.Errorf("failed to create hooks directory: %w", err)
-		}
-		gitkeepPath := filepath.Join(hookPath, ".gitkeep")
-		if err := os.WriteFile(gitkeepPath, []byte(""), 0644); err != nil {
-			return fmt.Errorf("failed to create .gitkeep: %w", err)
-		}
+	// Create hooks directory with example hooks
+	hooksPath := filepath.Join(absDir, "hooks")
+	if err := os.MkdirAll(hooksPath, 0755); err != nil {
+		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
-	// Create deps directory
-	depsPath := filepath.Join(absDir, "deps")
-	if err := os.MkdirAll(depsPath, 0755); err != nil {
-		return fmt.Errorf("failed to create deps directory: %w", err)
+	hookExamplePath := filepath.Join(hooksPath, "hook.example.sh")
+	if err := os.WriteFile(hookExamplePath, []byte(hookExampleTemplate), 0755); err != nil {
+		return fmt.Errorf("failed to create hook.example.sh: %w", err)
 	}
 
-	brewfilePath := filepath.Join(depsPath, "Brewfile")
-	if err := os.WriteFile(brewfilePath, []byte(defaultBrewfile), 0644); err != nil {
-		return fmt.Errorf("failed to create Brewfile: %w", err)
-	}
-
-	aptPath := filepath.Join(depsPath, "apt.txt")
-	if err := os.WriteFile(aptPath, []byte(defaultAptTxt), 0644); err != nil {
-		return fmt.Errorf("failed to create apt.txt: %w", err)
+	homebrewExamplePath := filepath.Join(hooksPath, "homebrew.example.sh")
+	if err := os.WriteFile(homebrewExamplePath, []byte(homebrewExampleTemplate), 0755); err != nil {
+		return fmt.Errorf("failed to create homebrew.example.sh: %w", err)
 	}
 
 	// Create scripts directory with bootstrap.sh
