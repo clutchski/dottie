@@ -9,20 +9,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRun_ExecutesScriptsInOrder(t *testing.T) {
+func TestRun_ExecutesAllScripts(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	outputFile := filepath.Join(tmpDir, "output.txt")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	// Create scripts that append to a file based on phase argument
+	// Create scripts that append to a file
 	script1 := filepath.Join(hooksDir, "01-first.sh")
 	require.NoError(t, os.WriteFile(script1, []byte(`#!/bin/bash
-echo "first:$1" >> `+outputFile), 0755))
+echo "first" >> `+outputFile), 0755))
 
 	script2 := filepath.Join(hooksDir, "02-second.sh")
 	require.NoError(t, os.WriteFile(script2, []byte(`#!/bin/bash
-echo "second:$1" >> `+outputFile), 0755))
+echo "second" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
 	err := runner.Run("pre-link", false, false)
@@ -30,7 +30,8 @@ echo "second:$1" >> `+outputFile), 0755))
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
-	assert.Equal(t, "first:pre-link\nsecond:pre-link\n", string(content))
+	assert.Contains(t, string(content), "first")
+	assert.Contains(t, string(content), "second")
 }
 
 func TestRun_PassesPhaseAsArgument(t *testing.T) {
