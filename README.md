@@ -54,13 +54,13 @@ This creates `~/.zshrc` as a symlink to `~/dotfiles/home/zshrc`. Now your config
 
 ### 3. Add a Hook
 
-Hooks run custom scripts for tasks beyond symlinking: installing packages, setting up plugins, configuring tools. Enable the Homebrew hook:
+Hooks run custom scripts for tasks beyond symlinking: installing packages, setting up plugins, configuring tools. Create one from the template:
 
 ```bash
-cp hooks/homebrew.example.sh hooks/homebrew.sh
+cp hooks/hook.example.sh hooks/01-setup.sh
 ```
 
-Now `dottie run` will install your Brewfile packages before linking dotfiles.
+Edit it to run in `pre-link` (before symlinking), `post-link` (after), or `status` (health checks). Now `dottie run` will execute your hook.
 
 ### 4. Commit and Push
 
