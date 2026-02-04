@@ -14,14 +14,6 @@ This auto-detects your OS and architecture and installs the latest release.
 
 Or install a [recent release](https://github.com/clutchski/dottie/releases) manually.
 
-### Build from Source
-
-```bash
-git clone https://github.com/clutchski/dottie.git
-cd dottie
-make install
-```
-
 ## Quick Start
 
 ### 1. Initialize a Dotfiles Repo
@@ -222,6 +214,14 @@ dotfiles/
 │   ├── homebrew.example.sh     # brew hook template (skipped)
 │   └── 01-brew.sh              # your active hook
 └── README.md
+```
+
+## Build from Source
+
+```bash
+git clone https://github.com/clutchski/dottie.git
+cd dottie
+make install
 ```
 
 ## License
