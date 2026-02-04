@@ -2,7 +2,13 @@
 set -e
 
 REPO="clutchski/dottie"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+if [ -z "$INSTALL_DIR" ]; then
+    if [ -d "$HOME/.local/bin" ]; then
+        INSTALL_DIR="$HOME/.local/bin"
+    else
+        INSTALL_DIR="/usr/local/bin"
+    fi
+fi
 QUIET="${QUIET:-}"
 
 log() {
