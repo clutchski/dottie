@@ -168,6 +168,9 @@ case "$1" in
     pre-link)
         touch ~/.my-setup-complete
         ;;
+    post-link)
+        echo "Dotfiles linked!"
+        ;;
     status)
         if [[ -f ~/.my-setup-complete ]]; then
             exit 0
