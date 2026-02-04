@@ -3,6 +3,11 @@ set -e
 
 REPO="clutchski/dottie"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+QUIET="${QUIET:-}"
+
+log() {
+    [ -z "$QUIET" ] && echo "$@"
+}
 
 # Detect OS
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -28,10 +33,10 @@ case "$ARCH" in
         ;;
 esac
 
-echo ""
-echo "==> Installing dottie"
-echo ""
-echo "    Platform: ${OS}/${ARCH}"
+log ""
+log "==> Installing dottie"
+log ""
+log "    Platform: ${OS}/${ARCH}"
 
 # Get latest version
 VERSION=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
@@ -41,8 +46,8 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-echo "    Version:  ${VERSION}"
-echo "    Target:   ${INSTALL_DIR}/dottie"
+log "    Version:  ${VERSION}"
+log "    Target:   ${INSTALL_DIR}/dottie"
 
 # Download and extract
 TARBALL="dottie_${VERSION#v}_${OS}_${ARCH}.tar.gz"
