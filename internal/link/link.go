@@ -2,8 +2,10 @@ package link
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/clutchski/dottie/internal/config"
 	"github.com/clutchski/dottie/internal/util"
@@ -46,69 +48,142 @@ type Result struct {
 	Error      error
 }
 
-// Linker handles symlinking dotfiles.
-type Linker struct {
+// linker handles symlinking dotfiles.
+type linker struct {
 	cfg *config.Config
 }
 
-// New creates a new Linker.
-func New(cfg *config.Config) *Linker {
-	return &Linker{cfg: cfg}
+// New creates a new linker.
+func New(cfg *config.Config) *linker {
+	return &linker{cfg: cfg}
 }
 
 // Link symlinks all dotfiles from source to target.
 // If dryRun is true, no changes are made.
 // If force is true, existing files are overwritten without backup.
-func (l *Linker) Link(dryRun, force bool) ([]Result, error) {
-	sourceDir := l.cfg.GetSourcePath()
-	return l.linkDir(sourceDir, l.cfg.TargetDir, dryRun, force, true)
-}
-
-// linkDir recursively links contents of sourceDir to targetDir.
-// If topLevel is true, applies add_dot transformation to names.
-func (l *Linker) linkDir(sourceDir, targetDir string, dryRun, force, topLevel bool) ([]Result, error) {
-	entries, err := os.ReadDir(sourceDir)
+func (l *linker) Link(dryRun, force bool) ([]Result, error) {
+	sources, err := l.collectSourcePaths()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read source directory: %w", err)
+		return nil, err
 	}
 
+	if !dryRun {
+		dirs := l.getTargetDirs(sources)
+		if err := l.makeDirs(dirs); err != nil {
+			return nil, err
+		}
+	}
+
+	return l.createLinks(sources, dryRun, force), nil
+}
+
+// collectSourcePaths walks the source directory and collects all file paths.
+func (l *linker) collectSourcePaths() ([]string, error) {
+	sourceDir := l.cfg.GetSourcePath()
+	var sources []string
+
+	err := filepath.WalkDir(sourceDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if path == sourceDir {
+			return nil
+		}
+
+		if l.cfg.ShouldIgnore(d.Name()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if !d.IsDir() {
+			sources = append(sources, path)
+		}
+		return nil
+	})
+
+	return sources, err
+}
+
+// getTargetDirs extracts unique target directories from source paths.
+func (l *linker) getTargetDirs(sourcePaths []string) []string {
+	seen := make(map[string]bool)
+	var dirs []string
+
+	sourceDir := l.cfg.GetSourcePath()
+
+	for _, source := range sourcePaths {
+		relPath, err := filepath.Rel(sourceDir, source)
+		if err != nil {
+			continue
+		}
+
+		parts := strings.Split(filepath.Dir(relPath), string(filepath.Separator))
+		if len(parts) == 1 && parts[0] == "." {
+			continue
+		}
+
+		currentTarget := l.cfg.TargetDir
+		for i, part := range parts {
+			targetPart := part
+			if i == 0 && l.cfg.AddDot && !strings.HasPrefix(part, ".") {
+				targetPart = "." + part
+			}
+			currentTarget = filepath.Join(currentTarget, targetPart)
+
+			if !seen[currentTarget] {
+				seen[currentTarget] = true
+				dirs = append(dirs, currentTarget)
+			}
+		}
+	}
+	return dirs
+}
+
+// makeDirs creates directories, replacing any symlinks with real directories.
+func (l *linker) makeDirs(dirs []string) error {
+	for _, dir := range dirs {
+		if util.IsSymlink(dir) {
+			if err := os.Remove(dir); err != nil {
+				return fmt.Errorf("failed to remove symlink %s: %w", dir, err)
+			}
+		}
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// createLinks creates symlinks for all source files.
+func (l *linker) createLinks(sources []string, dryRun, force bool) []Result {
+	sourceDir := l.cfg.GetSourcePath()
 	var results []Result
 
-	for _, entry := range entries {
-		name := entry.Name()
-
-		if l.cfg.ShouldIgnore(name) {
-			continue
-		}
-
-		sourcePath := filepath.Join(sourceDir, name)
-
-		var targetPath string
-		if topLevel {
-			targetPath = l.cfg.GetTargetPath(name)
-		} else {
-			targetPath = filepath.Join(targetDir, name)
-		}
-
-		// If source is a directory and target is an existing directory (not a symlink),
-		// recurse into it instead of linking the whole directory
-		if entry.IsDir() && util.IsDir(targetPath) && !util.IsSymlink(targetPath) {
-			subResults, err := l.linkDir(sourcePath, targetPath, dryRun, force, false)
-			if err != nil {
-				return results, err
-			}
-			results = append(results, subResults...)
-			continue
-		}
-
-		result := l.linkOne(sourcePath, targetPath, dryRun, force)
-		results = append(results, result)
+	for _, source := range sources {
+		relPath, _ := filepath.Rel(sourceDir, source)
+		target := l.computeTargetPath(relPath)
+		results = append(results, l.linkFile(source, target, dryRun, force))
 	}
-
-	return results, nil
+	return results
 }
 
-func (l *Linker) linkOne(source, target string, dryRun, force bool) Result {
+// computeTargetPath computes the target path for a file given its relative path.
+func (l *linker) computeTargetPath(relPath string) string {
+	parts := strings.Split(relPath, string(filepath.Separator))
+
+	// First component gets dot prefix via existing config method
+	firstTarget := l.cfg.GetTargetPath(parts[0])
+
+	if len(parts) == 1 {
+		return firstTarget
+	}
+	return filepath.Join(firstTarget, filepath.Join(parts[1:]...))
+}
+
+func (l *linker) linkFile(source, target string, dryRun, force bool) Result {
 	result := Result{
 		Source: source,
 		Target: target,
@@ -125,11 +200,12 @@ func (l *Linker) linkOne(source, target string, dryRun, force bool) Result {
 			}
 		}
 
-		// If source is a directory and target is an existing directory (not a symlink),
-		// recurse into it and link contents individually instead of replacing the directory
-		sourceInfo, err := os.Stat(source)
-		if err == nil && sourceInfo.IsDir() && util.IsDir(target) && !util.IsSymlink(target) {
-			result.Status = StatusSkipped // The directory itself is skipped, contents are linked
+		// Check if target resolves to the same file as source
+		// (e.g., through a parent directory symlink like ~/.config -> dotfiles/config)
+		targetInfo, targetErr := os.Stat(target)
+		sourceInfo, sourceErr := os.Stat(source)
+		if targetErr == nil && sourceErr == nil && os.SameFile(targetInfo, sourceInfo) {
+			result.Status = StatusAlreadyLinked
 			return result
 		}
 
@@ -170,14 +246,7 @@ func (l *Linker) linkOne(source, target string, dryRun, force bool) Result {
 		return result
 	}
 
-	// Ensure parent directory exists
-	if err := util.EnsureDir(filepath.Dir(target)); err != nil {
-		result.Status = StatusError
-		result.Error = fmt.Errorf("failed to create parent directory: %w", err)
-		return result
-	}
-
-	// Create symlink
+	// Create symlink (directories already prepared by prepareDirectories)
 	if err := os.Symlink(source, target); err != nil {
 		result.Status = StatusError
 		result.Error = fmt.Errorf("failed to create symlink: %w", err)

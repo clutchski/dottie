@@ -232,16 +232,30 @@ func TestLink_LinksDirectory(t *testing.T) {
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
 
-	_, err := linker.Link(false, false)
+	results, err := linker.Link(false, false)
 	require.NoError(t, err)
 
-	expectedTarget := filepath.Join(targetDir, ".config")
-	assert.True(t, isSymlink(expectedTarget), "expected symlink at %s", expectedTarget)
+	// New behavior: directories are created as real dirs, only files are symlinked
+	targetConfig := filepath.Join(targetDir, ".config")
+	assert.True(t, isDir(targetConfig), ".config should be a directory")
+	assert.False(t, isSymlink(targetConfig), ".config should NOT be a symlink")
 
-	linkedInitLua := filepath.Join(expectedTarget, "nvim", "init.lua")
+	targetNvim := filepath.Join(targetConfig, "nvim")
+	assert.True(t, isDir(targetNvim), "nvim should be a directory")
+	assert.False(t, isSymlink(targetNvim), "nvim should NOT be a symlink")
+
+	// The file itself should be symlinked
+	linkedInitLua := filepath.Join(targetNvim, "init.lua")
+	assert.True(t, isSymlink(linkedInitLua), "init.lua should be a symlink")
 	content, err := os.ReadFile(linkedInitLua)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "nvim config")
+
+	// Should have exactly one result (for the file)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusLinked, results[0].Status)
+	assert.Equal(t, initLua, results[0].Source)
+	assert.Equal(t, linkedInitLua, results[0].Target)
 }
 
 func TestLink_IgnoresConfiguredFiles(t *testing.T) {
@@ -389,4 +403,176 @@ func isSymlink(path string) bool {
 func fileExists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
+}
+
+func TestCollectSourcePaths_CollectsFilesOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	// Create a nested directory structure with files
+	configDir := filepath.Join(sourceDir, "config", "nvim")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+	initLua := filepath.Join(configDir, "init.lua")
+	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0644))
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	sources, err := linker.collectSourcePaths()
+	require.NoError(t, err)
+
+	// Should collect only files, not directories
+	require.Len(t, sources, 2)
+	assert.Contains(t, sources, vimrc)
+	assert.Contains(t, sources, initLua)
+}
+
+func TestCollectSourcePaths_IgnoresConfiguredDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	// Create files and directories, some of which should be ignored
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+
+	// Create an ignored directory with files
+	gitDir := filepath.Join(sourceDir, ".git")
+	require.NoError(t, os.MkdirAll(gitDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("git config"), 0644))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	sources, err := linker.collectSourcePaths()
+	require.NoError(t, err)
+
+	// Should only collect vimrc, not files inside .git
+	require.Len(t, sources, 1)
+	assert.Equal(t, vimrc, sources[0])
+}
+
+func TestLink_MigratesOldDirectorySymlinks(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	// Create source config/nvim/init.lua
+	configDir := filepath.Join(sourceDir, "config", "nvim")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+	initLua := filepath.Join(configDir, "init.lua")
+	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0644))
+
+	// Create old-style directory symlink (simulating previous dottie behavior)
+	targetConfig := filepath.Join(targetDir, ".config")
+	sourceConfig := filepath.Join(sourceDir, "config")
+	require.NoError(t, os.Symlink(sourceConfig, targetConfig))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	results, err := linker.Link(false, false)
+	require.NoError(t, err)
+
+	// Old directory symlink should be replaced with real directory
+	assert.False(t, isSymlink(targetConfig), ".config should NOT be a symlink anymore")
+	assert.True(t, isDir(targetConfig), ".config should be a real directory")
+
+	// File should be properly symlinked
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusLinked, results[0].Status)
+
+	linkedFile := filepath.Join(targetConfig, "nvim", "init.lua")
+	assert.True(t, isSymlink(linkedFile), "init.lua should be a symlink")
+
+	linkTarget, err := os.Readlink(linkedFile)
+	require.NoError(t, err)
+	assert.Equal(t, initLua, linkTarget)
+}
+
+func TestLink_ReplacesParentSymlinkWithDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+	otherPlace := filepath.Join(tmpDir, "other")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(otherPlace, 0755))
+
+	// Create source config/nvim/init.lua
+	configDir := filepath.Join(sourceDir, "config", "nvim")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+	initLua := filepath.Join(configDir, "init.lua")
+	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0644))
+
+	// Create ~/.config as symlink to a different place (not dotfiles)
+	targetConfig := filepath.Join(targetDir, ".config")
+	require.NoError(t, os.Symlink(otherPlace, targetConfig))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	results, err := linker.Link(false, false)
+	require.NoError(t, err)
+
+	// The parent symlink should have been replaced with a real directory
+	assert.False(t, isSymlink(targetConfig), ".config should NOT be a symlink anymore")
+	assert.True(t, isDir(targetConfig), ".config should be a real directory")
+
+	// The file should be symlinked
+	linkedFile := filepath.Join(targetConfig, "nvim", "init.lua")
+	assert.True(t, isSymlink(linkedFile), "init.lua should be a symlink")
+
+	linkTarget, err := os.Readlink(linkedFile)
+	require.NoError(t, err)
+	assert.Equal(t, initLua, linkTarget)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusLinked, results[0].Status)
+}
+
+func TestComputeTargetPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	tests := []struct {
+		relPath  string
+		expected string
+	}{
+		{"vimrc", filepath.Join(targetDir, ".vimrc")},
+		{"config/nvim/init.lua", filepath.Join(targetDir, ".config", "nvim", "init.lua")},
+		{"config/starship.toml", filepath.Join(targetDir, ".config", "starship.toml")},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.relPath, func(t *testing.T) {
+			result := linker.computeTargetPath(tc.relPath)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
 }
