@@ -1,6 +1,6 @@
 # dottie
 
-A simple dotfiles manager for macOS and Linux.
+A simple dotfiles manager for macOS and Linux. Keep your dotfiles in a git repo, sync them across machines, and do basic machine setup.
 
 ## Installation
 
@@ -14,17 +14,11 @@ This auto-detects your OS and architecture and installs the latest release.
 
 Or install a [recent release](https://github.com/clutchski/dottie/releases) manually.
 
-### Build from Source
-
-```bash
-git clone https://github.com/clutchski/dottie.git
-cd dottie
-make install
-```
-
 ## Quick Start
 
-### Create a New Dotfiles Repo
+### 1. Initialize a Dotfiles Repo
+
+Create a git repo to store your configuration files:
 
 ```bash
 mkdir ~/dotfiles && cd ~/dotfiles
@@ -32,39 +26,35 @@ git init
 dottie init
 ```
 
-This creates:
-- `dottie.yaml` - configuration file
-- `home/` - put your dotfiles here (without the leading dot)
-- `hooks/` - scripts to run before or after linking dotfiles
-- `README.md` - with bootstrap instructions
+This creates the repo structure: `home/` for dotfiles, `hooks/` for scripts, and `dottie.yaml` for config.
 
-### Add Your Dotfiles
+### 2. Add a Dotfile
 
-Copy your dotfiles into `home/` without the leading dot:
+Dotfiles are configuration files for your tools (shell, editor, git, etc.). Copy them into `home/` without the leading dot:
 
 ```bash
-cp ~/.vimrc ~/dotfiles/home/vimrc
 cp ~/.zshrc ~/dotfiles/home/zshrc
-cp -r ~/.config/nvim ~/dotfiles/home/config/nvim
 ```
 
-### Link Dotfiles
+### 3. Add a Hook (Optional)
 
-Preview what will happen:
+Hooks run custom scripts for tasks beyond symlinking: installing packages, setting up plugins, configuring tools. Create one from the template:
+
 ```bash
-dottie run -n  # dry-run
+cp hooks/hook.example.sh hooks/01-setup.sh
 ```
 
-Create the symlinks:
+Edit it to run in `pre-link` (before symlinking), `post-link` (after), or `status` (health checks).
+
+### 4. Run
+
 ```bash
 dottie run
 ```
 
-### Check Status
+This runs your hooks, then creates symlinks (e.g., `~/.zshrc` -> `~/dotfiles/home/zshrc`).
 
-```bash
-dottie status
-```
+Use `dottie status` to check what's linked.
 
 ## Bootstrap a New Machine
 
@@ -178,6 +168,9 @@ case "$1" in
     pre-link)
         touch ~/.my-setup-complete
         ;;
+    post-link)
+        echo "Dotfiles linked!"
+        ;;
     status)
         if [[ -f ~/.my-setup-complete ]]; then
             exit 0
@@ -195,23 +188,12 @@ Hidden files (`.foo`) and example files (`*.example.sh`) are skipped.
 cp hooks/homebrew.example.sh hooks/homebrew.sh
 ```
 
-## Example Repository Structure
+## Build from Source
 
-```
-dotfiles/
-├── dottie.yaml
-├── Brewfile              # optional: Homebrew packages (used by hook)
-├── home/
-│   ├── vimrc           -> ~/.vimrc
-│   ├── zshrc           -> ~/.zshrc
-│   ├── tmux.conf       -> ~/.tmux.conf
-│   └── config/
-│       └── nvim/       -> ~/.config/nvim/
-├── hooks/
-│   ├── hook.example.sh         # template (skipped)
-│   ├── homebrew.example.sh     # brew hook template (skipped)
-│   └── 01-brew.sh              # your active hook
-└── README.md
+```bash
+git clone https://github.com/clutchski/dottie.git
+cd dottie
+make install
 ```
 
 ## License
