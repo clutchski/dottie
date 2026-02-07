@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var emptyEnvVars map[string]string
+
 func TestRunPreLink_ReturnsEvents(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
@@ -20,7 +22,7 @@ func TestRunPreLink_ReturnsEvents(t *testing.T) {
 echo "hello stdout"
 echo "hello stderr" >&2`), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
 
@@ -52,7 +54,7 @@ func TestRunPreLink_FailedHook(t *testing.T) {
 echo "failing" >&2
 exit 1`), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
 
@@ -78,7 +80,7 @@ echo "first" >> `+outputFile), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-second.sh"), []byte(`#!/bin/bash
 echo "second" >> `+outputFile), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
 	for range events {
@@ -99,7 +101,7 @@ func TestRunPreLink_PassesPhaseAsArgument(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "hook.sh"), []byte(`#!/bin/bash
 echo "$1" >> `+outputFile), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
@@ -132,7 +134,10 @@ echo "ROOT=$DOTTIE_ROOT" >> `+outputFile+`
 echo "HOME=$DOTTIE_HOME" >> `+outputFile+`
 echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0755))
 
-	runner := New(hooksDir, "/my/dotfiles", "/home/user")
+	runner := New(hooksDir, map[string]string{
+		"DOTTIE_ROOT": "/my/dotfiles",
+		"DOTTIE_HOME": "/home/user",
+	})
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
 	for range events {
@@ -154,7 +159,7 @@ func TestRunPreLink_DryRunSetsEnvVar(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "check-dry-run.sh"), []byte(`#!/bin/bash
 echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	events, err := runner.RunPreLink(true)
 	require.NoError(t, err)
 	for range events {
@@ -170,7 +175,7 @@ func TestRunPreLink_NoHooks(t *testing.T) {
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
 
@@ -184,7 +189,7 @@ func TestRunPreLink_NoHooks(t *testing.T) {
 func TestRunPreLink_MissingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	runner := New(filepath.Join(tmpDir, "nonexistent"), tmpDir, "/home/test")
+	runner := New(filepath.Join(tmpDir, "nonexistent"), emptyEnvVars)
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
 
@@ -206,7 +211,7 @@ echo "hidden" >> `+outputFile), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "normal.sh"), []byte(`#!/bin/bash
 echo "normal" >> `+outputFile), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
 	for range events {
@@ -228,7 +233,7 @@ echo "example" >> `+outputFile), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "homebrew.sh"), []byte(`#!/bin/bash
 echo "normal" >> `+outputFile), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
 	for range events {
@@ -249,7 +254,7 @@ func TestRunPreLink_SkipsNonExecutableFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "hook.sh"), []byte(`#!/bin/bash
 echo "exec" >> `+outputFile), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
 	for range events {
@@ -267,7 +272,7 @@ func TestRunPreLink_SetsPhaseOnEvents(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "hook.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 
 	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
@@ -296,7 +301,7 @@ func TestCheckStatus_MixedResults(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-ok.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-fail.sh"), []byte("#!/bin/bash\nexit 1"), 0755))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	events, err := runner.CheckStatus()
 	require.NoError(t, err)
 
@@ -321,7 +326,7 @@ func TestList_ReturnsActiveHooks(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "hook.example.sh"), []byte("#!/bin/bash"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "README.md"), []byte("# Hooks"), 0644))
 
-	runner := New(hooksDir, tmpDir, "/home/test")
+	runner := New(hooksDir, emptyEnvVars)
 	hooks, err := runner.List()
 	require.NoError(t, err)
 
@@ -333,7 +338,7 @@ func TestList_ReturnsActiveHooks(t *testing.T) {
 func TestList_MissingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	runner := New(filepath.Join(tmpDir, "nonexistent"), tmpDir, "/home/test")
+	runner := New(filepath.Join(tmpDir, "nonexistent"), emptyEnvVars)
 	hooks, err := runner.List()
 	require.NoError(t, err)
 	assert.Empty(t, hooks)

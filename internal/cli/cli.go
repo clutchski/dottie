@@ -132,13 +132,19 @@ func runRun(args []string) int {
 	}
 
 	cwd, _ := os.Getwd()
-	hooks := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hooks := hooks.New(cfg.GetHooksPath(), map[string]string{
+		"DOTTIE_ROOT": cwd,
+		"DOTTIE_HOME": cfg.GetTargetDir(),
+	})
 
 	// Run pre-link hooks
 	preEvents, err := hooks.RunPreLink(*dryRun)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error running pre-link hooks: %v\n", err)
 		return 1
+	}
+	if *verbose {
+		fmt.Fprintln(con.Stdout, "hooks:")
 	}
 	preDone := processRunHooks(preEvents, *verbose, con)
 
@@ -223,12 +229,12 @@ func processRunHooks(events <-chan hooks.Event, verbose bool, con *console.Conso
 		switch ev.Kind {
 		case hooks.Started:
 			if verbose {
-				fmt.Fprintf(con.Stdout, "  %s◎%s start: %s\n", colorYellow, colorReset, hookDisplayName(ev.Hook))
+				fmt.Fprintf(con.Stdout, "  %s◎%s start: %s\n", colorYellow, colorReset, ev.HookDisplay())
 			}
 		case hooks.Done:
 			done = append(done, ev)
 			if verbose {
-				name := hookDisplayName(ev.Hook)
+				name := ev.HookDisplay()
 				if ev.Err != nil {
 					fmt.Fprintf(con.Stdout, "  %sx%s done:  %s (%.1fs)\n", colorRed, colorReset, name, ev.Duration.Seconds())
 					_, _ = con.Stdout.Write(ev.Stdout)
@@ -315,7 +321,10 @@ func runHooksList(args []string) int {
 	}
 
 	cwd, _ := os.Getwd()
-	hooks := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hooks := hooks.New(cfg.GetHooksPath(), map[string]string{
+		"DOTTIE_ROOT": cwd,
+		"DOTTIE_HOME": cfg.GetTargetDir(),
+	})
 
 	list, err := hooks.List()
 	if err != nil {
@@ -360,7 +369,10 @@ func runHooksRun(args []string) int {
 	}
 
 	cwd, _ := os.Getwd()
-	hooks := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hooks := hooks.New(cfg.GetHooksPath(), map[string]string{
+		"DOTTIE_ROOT": cwd,
+		"DOTTIE_HOME": cfg.GetTargetDir(),
+	})
 
 	events, err := runPhase(hooks, phase, *dryRun)
 	if err != nil {
@@ -393,11 +405,11 @@ func processHooksCommand(events <-chan hooks.Event, phase string, verbose bool) 
 		switch ev.Kind {
 		case hooks.Started:
 			if verbose {
-				fmt.Printf("  %s◎%s start: %s\n", colorYellow, colorReset, hookDisplayName(ev.Hook))
+				fmt.Printf("  %s◎%s start: %s\n", colorYellow, colorReset, ev.HookDisplay())
 			}
 		case hooks.Done:
 			if verbose {
-				name := hookDisplayName(ev.Hook)
+				name := ev.HookDisplay()
 				if ev.Err != nil {
 					fmt.Printf("  %sx%s done:  %s (%.1fs)\n", colorRed, colorReset, name, ev.Duration.Seconds())
 				} else {
@@ -441,7 +453,10 @@ func runStatus(args []string) int {
 
 	// Start hooks check in background
 	cwd, _ := os.Getwd()
-	hooks := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hooks := hooks.New(cfg.GetHooksPath(), map[string]string{
+		"DOTTIE_ROOT": cwd,
+		"DOTTIE_HOME": cfg.GetTargetDir(),
+	})
 	hookEvents, err := hooks.CheckStatus()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error running status hooks: %v\n", err)
@@ -518,7 +533,7 @@ func printHooksSummary(w io.Writer, doneEvents []hooks.Event, hookOk map[string]
 
 	var okNames, failNames []string
 	for _, ev := range doneEvents {
-		name := hookDisplayName(ev.Hook)
+		name := ev.HookDisplay()
 		if hookOk[ev.Hook] {
 			okNames = append(okNames, name)
 		} else {

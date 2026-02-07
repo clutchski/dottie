@@ -33,33 +33,40 @@ type Event struct {
 	Stderr   []byte        // set on Done
 }
 
+// HookDisplay returns a display name from the hook path.
+// Strips directory and extension: "/path/to/01-homebrew.sh" -> "01-homebrew".
+func (e Event) HookDisplay() string {
+	name := filepath.Base(e.Hook)
+	if ext := filepath.Ext(name); ext != name {
+		return strings.TrimSuffix(name, ext)
+	}
+	return name
+}
+
 // Runner executes hook scripts.
 type Runner struct {
-	hooksDir string
-	rootDir  string
-	homeDir  string
+	directory string
+	envVars   map[string]string
 }
 
 // New creates a new hook Runner.
-// hooksDir is the path to the hooks directory.
-// rootDir is the dotfiles repository root (set as DOTTIE_ROOT).
-// homeDir is the target home directory (set as DOTTIE_HOME).
-func New(hooksDir, rootDir, homeDir string) *Runner {
+// directory is the path to the hooks directory.
+// envVars are additional environment variables passed to each hook script.
+func New(directory string, envVars map[string]string) *Runner {
 	return &Runner{
-		hooksDir: hooksDir,
-		rootDir:  rootDir,
-		homeDir:  homeDir,
+		directory: directory,
+		envVars:   envVars,
 	}
 }
 
 // List returns all active hook scripts (executable, non-hidden, non-example),
 // sorted alphabetically.
 func (r *Runner) List() ([]string, error) {
-	if _, err := os.Stat(r.hooksDir); os.IsNotExist(err) {
+	if _, err := os.Stat(r.directory); os.IsNotExist(err) {
 		return nil, nil
 	}
 
-	entries, err := os.ReadDir(r.hooksDir)
+	entries, err := os.ReadDir(r.directory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read hooks directory: %w", err)
 	}
@@ -82,7 +89,7 @@ func (r *Runner) List() ([]string, error) {
 			continue
 		}
 
-		path := filepath.Join(r.hooksDir, name)
+		path := filepath.Join(r.directory, name)
 		if !isExecutable(path) {
 			continue
 		}
@@ -152,11 +159,12 @@ func (r *Runner) runScriptCapture(path, phase string, dryRun bool, stdout, stder
 	cmd := exec.Command(path, phase)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.Env = append(os.Environ(),
-		"DOTTIE_ROOT="+r.rootDir,
-		"DOTTIE_HOME="+r.homeDir,
-		"DOTTIE_DRY_RUN="+boolToString(dryRun),
-	)
+	env := os.Environ()
+	for k, v := range r.envVars {
+		env = append(env, k+"="+v)
+	}
+	env = append(env, "DOTTIE_DRY_RUN="+boolToString(dryRun))
+	cmd.Env = env
 	return cmd.Run()
 }
 
