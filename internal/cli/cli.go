@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/clutchski/dottie/internal/config"
 	"github.com/clutchski/dottie/internal/console"
@@ -15,6 +16,7 @@ import (
 	dotinit "github.com/clutchski/dottie/internal/init"
 	"github.com/clutchski/dottie/internal/link"
 	"github.com/clutchski/dottie/internal/status"
+	"github.com/clutchski/dottie/internal/update"
 )
 
 var (
@@ -25,9 +27,10 @@ var (
 
 // ANSI color codes
 const (
-	colorReset = "\033[0m"
-	colorGreen = "\033[32m"
-	colorRed   = "\033[31m"
+	colorReset  = "\033[0m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorRed    = "\033[31m"
 )
 
 // SetVersion sets version info (called from main).
@@ -53,6 +56,8 @@ func Run(args []string) int {
 		return runHooks(args[1:])
 	case "status":
 		return runStatus(args[1:])
+	case "update":
+		return runUpdate()
 	case "version", "--version", "-v":
 		printVersion()
 		return 0
@@ -77,6 +82,7 @@ Commands:
   run            Run hooks and symlink dotfiles to home directory
   hooks          Manage hooks (list, run)
   status         Show status of dotfiles
+  update         Update dottie to the latest version
   version        Show version information
   help           Show this help message`)
 }
@@ -378,14 +384,15 @@ func runStatus(args []string) int {
 		return 1
 	}
 
-	fmt.Fprintf(con.Stdout, "dottie %s\n", version)
+	// Start version check in background
+	versionChan := update.GetVersion(version)
 
-	// Start hooks first (they're slower)
+	// Start hooks check in background
 	cwd, _ := os.Getwd()
 	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
 	hooksChan := hookRunner.StartStatusCheck()
 
-	// Print dotfiles status
+	// Print dotfiles status while hooks and version check run
 	checker := status.New(cfg)
 	var allOk bool
 	if *quiet {
@@ -408,6 +415,21 @@ func runStatus(args []string) int {
 	}
 
 	hooksOk := printHooksSummary(con.Stdout, hookResult.Hooks)
+
+	// Show dottie version and update status
+	fmt.Printf("dottie: %s", version)
+	select {
+	case vr := <-versionChan:
+		if vr.Err == nil {
+			if vr.UpToDate {
+				fmt.Printf(" %s(up to date)%s", colorGreen, colorReset)
+			} else {
+				fmt.Printf(" %s(update available: %s)%s", colorYellow, vr.Latest, colorReset)
+			}
+		}
+	case <-time.After(2 * time.Second):
+	}
+	fmt.Println()
 
 	if !allOk || !hooksOk {
 		return 1
@@ -440,6 +462,14 @@ func printHooksSummary(w io.Writer, hookStatuses []hooks.HookStatus) bool {
 	}
 
 	return len(failNames) == 0
+}
+
+func runUpdate() int {
+	if err := update.Run(version); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func loadConfig() (*config.Config, error) {
