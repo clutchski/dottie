@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -133,20 +132,15 @@ func runRun(args []string) int {
 	}
 
 	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
-
-	// Track per-hook results across phases (ok only if all phases pass)
-	hookOk := make(map[string]bool)
+	hooks := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
 
 	// Run pre-link hooks
-	preHooks, err := runHookPhase(hookRunner, "pre-link", *dryRun, *verbose, con)
+	preEvents, err := hooks.RunPreLink(*dryRun)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error running pre-link hooks: %v\n", err)
 		return 1
 	}
-	for _, h := range preHooks {
-		hookOk[h.Name] = h.Ok
-	}
+	preDone := processRunHooks(preEvents, *verbose, con)
 
 	// Link dotfiles
 	linker := link.New(cfg)
@@ -192,55 +186,62 @@ func runRun(args []string) int {
 	}
 
 	// Run post-link hooks
-	postHooks, err := runHookPhase(hookRunner, "post-link", *dryRun, *verbose, con)
+	postEvents, err := hooks.RunPostLink(*dryRun)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error running post-link hooks: %v\n", err)
 		return 1
 	}
-	for _, h := range postHooks {
-		if !h.Ok {
-			hookOk[h.Name] = false
-		}
-	}
+	postDone := processRunHooks(postEvents, *verbose, con)
 
 	// Default mode: print summary
 	if !*verbose && !*quiet {
 		printRunSummary(con.Stdout, results)
-		// Build deduplicated hook statuses preserving order from preHooks
-		var dedupedHooks []hooks.HookStatus
-		for _, h := range preHooks {
-			dedupedHooks = append(dedupedHooks, hooks.HookStatus{Name: h.Name, Ok: hookOk[h.Name]})
+
+		// Merge hook results across phases (ok only if all phases pass)
+		hookOk := make(map[string]bool)
+		for _, ev := range preDone {
+			hookOk[ev.Hook] = ev.Err == nil
 		}
-		printHooksSummary(con.Stdout, dedupedHooks)
+		for _, ev := range postDone {
+			if ev.Err != nil {
+				hookOk[ev.Hook] = false
+			}
+		}
+		printHooksSummary(con.Stdout, preDone, hookOk)
 	}
 
 	return 0
 }
 
-// runHookPhase runs hooks for a phase. In verbose mode, output streams through.
-// In default mode, output is captured and only shown if the hook fails.
-// Returns per-hook statuses.
-func runHookPhase(runner *hooks.Runner, phase string, dryRun, verbose bool, con *console.Console) ([]hooks.HookStatus, error) {
-	if verbose {
-		err := runner.Run(phase, dryRun, verbose, con)
-		return nil, err
-	}
-	// Default/quiet: capture output, show on failure
-	var bufOut, bufErr bytes.Buffer
-	bufCon := &console.Console{Stdout: &bufOut, Stderr: &bufErr}
-	statuses, err := runner.RunAll(phase, dryRun, false, bufCon)
-	if err != nil {
-		return nil, err
-	}
-	// Show captured output for any failed hooks
-	for _, s := range statuses {
-		if !s.Ok {
-			_, _ = con.Stdout.Write(bufOut.Bytes())
-			_, _ = con.Stderr.Write(bufErr.Bytes())
-			break
+// processRunHooks drains hook events for the `run` command.
+// In verbose mode, prints start/done lines and streams failed output.
+// In non-verbose mode, prints stderr from failed hooks.
+// Returns Done events for summary building.
+func processRunHooks(events <-chan hooks.Event, verbose bool, con *console.Console) []hooks.Event {
+	var done []hooks.Event
+	for ev := range events {
+		switch ev.Kind {
+		case hooks.Started:
+			if verbose {
+				fmt.Fprintf(con.Stdout, "  %s◎%s start: %s\n", colorYellow, colorReset, hookDisplayName(ev.Hook))
+			}
+		case hooks.Done:
+			done = append(done, ev)
+			if verbose {
+				name := hookDisplayName(ev.Hook)
+				if ev.Err != nil {
+					fmt.Fprintf(con.Stdout, "  %sx%s done:  %s (%.1fs)\n", colorRed, colorReset, name, ev.Duration.Seconds())
+					_, _ = con.Stdout.Write(ev.Stdout)
+					_, _ = con.Stderr.Write(ev.Stderr)
+				} else {
+					fmt.Fprintf(con.Stdout, "  %s✓%s done:  %s (%.1fs)\n", colorGreen, colorReset, name, ev.Duration.Seconds())
+				}
+			} else if ev.Err != nil {
+				_, _ = con.Stderr.Write(ev.Stderr)
+			}
 		}
 	}
-	return statuses, nil
+	return done
 }
 
 // printRunSummary prints the dotfiles summary line for a run.
@@ -314,22 +315,22 @@ func runHooksList(args []string) int {
 	}
 
 	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hooks := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
 
-	hooksList, err := hookRunner.List()
+	list, err := hooks.List()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
 
-	if len(hooksList) == 0 {
+	if len(list) == 0 {
 		fmt.Println("No active hooks found")
 		return 0
 	}
 
 	fmt.Println("Active hooks:")
-	for _, h := range hooksList {
-		fmt.Printf("  %s\n", filepath.Base(h))
+	for _, h := range list {
+		fmt.Printf("  %s\n", hookDisplayName(h))
 	}
 
 	return 0
@@ -359,13 +360,64 @@ func runHooksRun(args []string) int {
 	}
 
 	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hooks := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
 
-	if err := hookRunner.Run(phase, *dryRun, *verbose, console.New(false)); err != nil {
+	events, err := runPhase(hooks, phase, *dryRun)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error running %s hooks: %v\n", phase, err)
 		return 1
 	}
 
+	return processHooksCommand(events, phase, *verbose)
+}
+
+// runPhase calls the appropriate phase method on the runner.
+func runPhase(runner *hooks.Runner, phase string, dryRun bool) (<-chan hooks.Event, error) {
+	switch phase {
+	case "pre-link":
+		return runner.RunPreLink(dryRun)
+	case "post-link":
+		return runner.RunPostLink(dryRun)
+	case "status":
+		return runner.CheckStatus()
+	default:
+		return nil, fmt.Errorf("invalid phase: %s", phase)
+	}
+}
+
+// processHooksCommand drains hook events for `dottie hooks run`.
+// Prints start/done lines in verbose mode. Reports first failure and returns exit code.
+func processHooksCommand(events <-chan hooks.Event, phase string, verbose bool) int {
+	var failed []hooks.Event
+	for ev := range events {
+		switch ev.Kind {
+		case hooks.Started:
+			if verbose {
+				fmt.Printf("  %s◎%s start: %s\n", colorYellow, colorReset, hookDisplayName(ev.Hook))
+			}
+		case hooks.Done:
+			if verbose {
+				name := hookDisplayName(ev.Hook)
+				if ev.Err != nil {
+					fmt.Printf("  %sx%s done:  %s (%.1fs)\n", colorRed, colorReset, name, ev.Duration.Seconds())
+				} else {
+					fmt.Printf("  %s✓%s done:  %s (%.1fs)\n", colorGreen, colorReset, name, ev.Duration.Seconds())
+				}
+			}
+			if ev.Err != nil {
+				failed = append(failed, ev)
+			}
+		}
+	}
+
+	for _, ev := range failed {
+		_, _ = os.Stdout.Write(ev.Stdout)
+		_, _ = os.Stderr.Write(ev.Stderr)
+	}
+
+	if len(failed) > 0 {
+		return 1
+	}
 	return 0
 }
 
@@ -389,10 +441,14 @@ func runStatus(args []string) int {
 
 	// Start hooks check in background
 	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
-	hooksChan := hookRunner.StartStatusCheck()
+	hooks := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hookEvents, err := hooks.CheckStatus()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error running status hooks: %v\n", err)
+		return 1
+	}
 
-	// Print dotfiles status while hooks and version check run
+	// Print dotfiles status while hooks run in background
 	checker := status.New(cfg)
 	var allOk bool
 	if *quiet {
@@ -407,14 +463,8 @@ func runStatus(args []string) int {
 		return 1
 	}
 
-	// Wait for hooks and print results
-	hookResult := <-hooksChan
-	if hookResult.Err != nil {
-		fmt.Fprintf(os.Stderr, "Error running status hooks: %v\n", hookResult.Err)
-		return 1
-	}
-
-	hooksOk := printHooksSummary(con.Stdout, hookResult.Hooks)
+	// Wait for hooks and print summary
+	hooksOk := processStatusHooks(hookEvents, con.Stdout)
 
 	// Show dottie version and update status
 	fmt.Printf("dottie: %s", version)
@@ -437,16 +487,39 @@ func runStatus(args []string) int {
 	return 0
 }
 
+// processStatusHooks drains hook events for the `status` command.
+// Prints the hooks summary and returns true if all hooks passed.
+func processStatusHooks(events <-chan hooks.Event, w io.Writer) bool {
+	var done []hooks.Event
+	for ev := range events {
+		if ev.Kind == hooks.Done {
+			done = append(done, ev)
+		}
+	}
+
+	if len(done) == 0 {
+		return true
+	}
+
+	hookOk := make(map[string]bool)
+	for _, ev := range done {
+		hookOk[ev.Hook] = ev.Err == nil
+	}
+	return printHooksSummary(w, done, hookOk)
+}
+
 // printHooksSummary prints [ok]/[x] lines for hooks. Returns true if all ok.
-func printHooksSummary(w io.Writer, hookStatuses []hooks.HookStatus) bool {
-	if len(hookStatuses) == 0 {
+// doneEvents are the Done events from one phase (used for ordering).
+// hookOk maps hook path -> final ok status across all phases.
+func printHooksSummary(w io.Writer, doneEvents []hooks.Event, hookOk map[string]bool) bool {
+	if len(doneEvents) == 0 {
 		return true
 	}
 
 	var okNames, failNames []string
-	for _, h := range hookStatuses {
-		name := hooks.DisplayName(h.Name)
-		if h.Ok {
+	for _, ev := range doneEvents {
+		name := hookDisplayName(ev.Hook)
+		if hookOk[ev.Hook] {
 			okNames = append(okNames, name)
 		} else {
 			failNames = append(failNames, name)
@@ -462,6 +535,16 @@ func printHooksSummary(w io.Writer, hookStatuses []hooks.HookStatus) bool {
 	}
 
 	return len(failNames) == 0
+}
+
+// hookDisplayName returns a display name from a hook path.
+// Strips directory and extension: "/path/to/01-homebrew.sh" -> "01-homebrew".
+func hookDisplayName(path string) string {
+	name := filepath.Base(path)
+	if ext := filepath.Ext(name); ext != name {
+		return strings.TrimSuffix(name, ext)
+	}
+	return name
 }
 
 func runUpdate() int {

@@ -1,37 +1,88 @@
 package hooks
 
 import (
-	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	"github.com/clutchski/dottie/internal/console"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var silent = &console.Console{Stdout: io.Discard, Stderr: io.Discard}
+func TestRunPreLink_ReturnsEvents(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-func TestRun_ExecutesAllScripts(t *testing.T) {
+	scriptPath := filepath.Join(hooksDir, "01-hello.sh")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(`#!/bin/bash
+echo "hello stdout"
+echo "hello stderr" >&2`), 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+	events, err := runner.RunPreLink(false)
+	require.NoError(t, err)
+
+	var started, done int
+	for ev := range events {
+		assert.Equal(t, scriptPath, ev.Hook)
+		assert.Equal(t, "pre-link", ev.Phase)
+		switch ev.Kind {
+		case Started:
+			started++
+		case Done:
+			done++
+			assert.NoError(t, ev.Err)
+			assert.Greater(t, ev.Duration, time.Duration(0))
+			assert.Contains(t, string(ev.Stdout), "hello stdout")
+			assert.Contains(t, string(ev.Stderr), "hello stderr")
+		}
+	}
+	assert.Equal(t, 1, started)
+	assert.Equal(t, 1, done)
+}
+
+func TestRunPreLink_FailedHook(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "fail.sh"), []byte(`#!/bin/bash
+echo "failing" >&2
+exit 1`), 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+	events, err := runner.RunPreLink(false)
+	require.NoError(t, err)
+
+	var doneEvents []Event
+	for ev := range events {
+		if ev.Kind == Done {
+			doneEvents = append(doneEvents, ev)
+		}
+	}
+	require.Len(t, doneEvents, 1)
+	assert.Error(t, doneEvents[0].Err)
+	assert.Contains(t, string(doneEvents[0].Stderr), "failing")
+}
+
+func TestRunPreLink_ExecutesAllScripts(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	outputFile := filepath.Join(tmpDir, "output.txt")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	// Create scripts that append to a file
-	script1 := filepath.Join(hooksDir, "01-first.sh")
-	require.NoError(t, os.WriteFile(script1, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-first.sh"), []byte(`#!/bin/bash
 echo "first" >> `+outputFile), 0755))
-
-	script2 := filepath.Join(hooksDir, "02-second.sh")
-	require.NoError(t, os.WriteFile(script2, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-second.sh"), []byte(`#!/bin/bash
 echo "second" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false, silent)
+	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
+	for range events {
+	}
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
@@ -39,43 +90,53 @@ echo "second" >> `+outputFile), 0755))
 	assert.Contains(t, string(content), "second")
 }
 
-func TestRun_PassesPhaseAsArgument(t *testing.T) {
+func TestRunPreLink_PassesPhaseAsArgument(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	outputFile := filepath.Join(tmpDir, "output.txt")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	script := filepath.Join(hooksDir, "hook.sh")
-	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "hook.sh"), []byte(`#!/bin/bash
 echo "$1" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
 
-	// Test different phases
-	require.NoError(t, runner.Run("pre-link", false, false, silent))
-	require.NoError(t, runner.Run("post-link", false, false, silent))
-	require.NoError(t, runner.Run("status", false, false, silent))
+	events, err := runner.RunPreLink(false)
+	require.NoError(t, err)
+	for range events {
+	}
+
+	events, err = runner.RunPostLink(false)
+	require.NoError(t, err)
+	for range events {
+	}
+
+	events, err = runner.CheckStatus()
+	require.NoError(t, err)
+	for range events {
+	}
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
 	assert.Equal(t, "pre-link\npost-link\nstatus\n", string(content))
 }
 
-func TestRun_SetsEnvironmentVariables(t *testing.T) {
+func TestRunPreLink_SetsEnvironmentVariables(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	outputFile := filepath.Join(tmpDir, "output.txt")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	script := filepath.Join(hooksDir, "check-env.sh")
-	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "check-env.sh"), []byte(`#!/bin/bash
 echo "ROOT=$DOTTIE_ROOT" >> `+outputFile+`
 echo "HOME=$DOTTIE_HOME" >> `+outputFile+`
 echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, "/my/dotfiles", "/home/user")
-	err := runner.Run("pre-link", false, false, silent)
+	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
+	for range events {
+	}
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
@@ -84,106 +145,169 @@ echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0755))
 	assert.Contains(t, string(content), "DRY_RUN=false")
 }
 
-func TestRun_DryRunSetsEnvVar(t *testing.T) {
+func TestRunPreLink_DryRunSetsEnvVar(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	outputFile := filepath.Join(tmpDir, "output.txt")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	// Script should still run in dry-run mode but with DOTTIE_DRY_RUN=true
-	script := filepath.Join(hooksDir, "check-dry-run.sh")
-	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "check-dry-run.sh"), []byte(`#!/bin/bash
 echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", true, false, silent)
+	events, err := runner.RunPreLink(true)
 	require.NoError(t, err)
+	for range events {
+	}
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "DRY_RUN=true")
 }
 
-func TestRun_SkipsMissingDirectory(t *testing.T) {
+func TestRunPreLink_NoHooks(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+	events, err := runner.RunPreLink(false)
+	require.NoError(t, err)
+
+	count := 0
+	for range events {
+		count++
+	}
+	assert.Equal(t, 0, count)
+}
+
+func TestRunPreLink_MissingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	runner := New(filepath.Join(tmpDir, "nonexistent"), tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false, silent)
-	require.NoError(t, err) // Should not error on missing dir
+	events, err := runner.RunPreLink(false)
+	require.NoError(t, err)
+
+	count := 0
+	for range events {
+		count++
+	}
+	assert.Equal(t, 0, count)
 }
 
-func TestRun_SkipsHiddenFiles(t *testing.T) {
+func TestRunPreLink_SkipsHiddenFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	outputFile := filepath.Join(tmpDir, "output.txt")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	// Hidden file should be skipped
-	hidden := filepath.Join(hooksDir, ".hidden.sh")
-	require.NoError(t, os.WriteFile(hidden, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, ".hidden.sh"), []byte(`#!/bin/bash
 echo "hidden" >> `+outputFile), 0755))
-
-	// Normal file should run
-	normal := filepath.Join(hooksDir, "normal.sh")
-	require.NoError(t, os.WriteFile(normal, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "normal.sh"), []byte(`#!/bin/bash
 echo "normal" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false, silent)
+	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
+	for range events {
+	}
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
 	assert.Equal(t, "normal\n", string(content))
 }
 
-func TestRun_SkipsExampleFiles(t *testing.T) {
+func TestRunPreLink_SkipsExampleFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	outputFile := filepath.Join(tmpDir, "output.txt")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	// Example file should be skipped
-	example := filepath.Join(hooksDir, "homebrew.example.sh")
-	require.NoError(t, os.WriteFile(example, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "homebrew.example.sh"), []byte(`#!/bin/bash
 echo "example" >> `+outputFile), 0755))
-
-	// Normal file should run
-	normal := filepath.Join(hooksDir, "homebrew.sh")
-	require.NoError(t, os.WriteFile(normal, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "homebrew.sh"), []byte(`#!/bin/bash
 echo "normal" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false, silent)
+	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
+	for range events {
+	}
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
 	assert.Equal(t, "normal\n", string(content))
 }
 
-func TestRun_SkipsNonExecutableFiles(t *testing.T) {
+func TestRunPreLink_SkipsNonExecutableFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	outputFile := filepath.Join(tmpDir, "output.txt")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	// Non-executable file should be skipped
-	readme := filepath.Join(hooksDir, "README.md")
-	require.NoError(t, os.WriteFile(readme, []byte("# Hooks"), 0644))
-
-	// Executable file should run
-	exec := filepath.Join(hooksDir, "hook.sh")
-	require.NoError(t, os.WriteFile(exec, []byte(`#!/bin/bash
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "README.md"), []byte("# Hooks"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "hook.sh"), []byte(`#!/bin/bash
 echo "exec" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false, silent)
+	events, err := runner.RunPreLink(false)
 	require.NoError(t, err)
+	for range events {
+	}
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
 	assert.Equal(t, "exec\n", string(content))
+}
+
+func TestRunPreLink_SetsPhaseOnEvents(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "hook.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+
+	events, err := runner.RunPreLink(false)
+	require.NoError(t, err)
+	for ev := range events {
+		assert.Equal(t, "pre-link", ev.Phase)
+	}
+
+	events, err = runner.RunPostLink(false)
+	require.NoError(t, err)
+	for ev := range events {
+		assert.Equal(t, "post-link", ev.Phase)
+	}
+
+	events, err = runner.CheckStatus()
+	require.NoError(t, err)
+	for ev := range events {
+		assert.Equal(t, "status", ev.Phase)
+	}
+}
+
+func TestCheckStatus_MixedResults(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-ok.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-fail.sh"), []byte("#!/bin/bash\nexit 1"), 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+	events, err := runner.CheckStatus()
+	require.NoError(t, err)
+
+	results := map[string]error{}
+	for ev := range events {
+		if ev.Kind == Done {
+			results[filepath.Base(ev.Hook)] = ev.Err
+		}
+	}
+	assert.NoError(t, results["01-ok.sh"])
+	assert.Error(t, results["02-fail.sh"])
 }
 
 func TestList_ReturnsActiveHooks(t *testing.T) {
@@ -191,7 +315,6 @@ func TestList_ReturnsActiveHooks(t *testing.T) {
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	require.NoError(t, os.MkdirAll(hooksDir, 0755))
 
-	// Create various files
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-second.sh"), []byte("#!/bin/bash"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-first.sh"), []byte("#!/bin/bash"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, ".hidden.sh"), []byte("#!/bin/bash"), 0755))
@@ -214,172 +337,4 @@ func TestList_MissingDirectory(t *testing.T) {
 	hooks, err := runner.List()
 	require.NoError(t, err)
 	assert.Empty(t, hooks)
-}
-
-func TestStartStatusCheck_AllOk(t *testing.T) {
-	tmpDir := t.TempDir()
-	hooksDir := filepath.Join(tmpDir, "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0755))
-
-	// Create hooks that exit 0
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "ok-hook.sh"), []byte(`#!/bin/bash
-exit 0`), 0755))
-
-	runner := New(hooksDir, tmpDir, "/home/test")
-	result := <-runner.StartStatusCheck()
-	require.NoError(t, result.Err)
-	require.Len(t, result.Hooks, 1)
-	assert.True(t, result.Hooks[0].Ok)
-}
-
-func TestStartStatusCheck_SomeFailed(t *testing.T) {
-	tmpDir := t.TempDir()
-	hooksDir := filepath.Join(tmpDir, "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0755))
-
-	// Create one hook that exits 0 and one that exits 1
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-ok.sh"), []byte(`#!/bin/bash
-exit 0`), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-fail.sh"), []byte(`#!/bin/bash
-exit 1`), 0755))
-
-	runner := New(hooksDir, tmpDir, "/home/test")
-	result := <-runner.StartStatusCheck()
-	require.NoError(t, result.Err)
-	require.Len(t, result.Hooks, 2)
-	assert.True(t, result.Hooks[0].Ok)
-	assert.False(t, result.Hooks[1].Ok)
-}
-
-func TestStartStatusCheck_EmptyDirectory(t *testing.T) {
-	tmpDir := t.TempDir()
-	hooksDir := filepath.Join(tmpDir, "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0755))
-
-	runner := New(hooksDir, tmpDir, "/home/test")
-	result := <-runner.StartStatusCheck()
-	require.NoError(t, result.Err)
-	assert.Empty(t, result.Hooks)
-}
-
-func TestStartStatusCheck_MissingDirectory(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	runner := New(filepath.Join(tmpDir, "nonexistent"), tmpDir, "/home/test")
-	result := <-runner.StartStatusCheck()
-	require.NoError(t, result.Err)
-	assert.Empty(t, result.Hooks)
-}
-
-func TestDisplayName(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"homebrew.sh", "homebrew"},
-		{"01-homebrew.sh", "01-homebrew"},
-		{"setup", "setup"},
-		{"my-script.bash", "my-script"},
-		{"", ""},
-		{".hidden", ".hidden"},
-		{"no-ext", "no-ext"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			assert.Equal(t, tt.want, DisplayName(tt.input))
-		})
-	}
-}
-
-func TestRunAll_ReturnsPerHookStatuses(t *testing.T) {
-	tmpDir := t.TempDir()
-	hooksDir := filepath.Join(tmpDir, "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0755))
-
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-ok.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-fail.sh"), []byte("#!/bin/bash\nexit 1"), 0755))
-
-	runner := New(hooksDir, tmpDir, "/home/test")
-	statuses, err := runner.RunAll("pre-link", false, false, silent)
-	require.NoError(t, err)
-
-	require.Len(t, statuses, 2)
-	assert.Equal(t, "01-ok.sh", statuses[0].Name)
-	assert.True(t, statuses[0].Ok)
-	assert.Equal(t, "02-fail.sh", statuses[1].Name)
-	assert.False(t, statuses[1].Ok)
-}
-
-func TestRunAll_EmptyDirectory(t *testing.T) {
-	tmpDir := t.TempDir()
-	hooksDir := filepath.Join(tmpDir, "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0755))
-
-	runner := New(hooksDir, tmpDir, "/home/test")
-	statuses, err := runner.RunAll("pre-link", false, false, silent)
-	require.NoError(t, err)
-	assert.Nil(t, statuses)
-}
-
-func TestRunAll_MissingDirectory(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	runner := New(filepath.Join(tmpDir, "nonexistent"), tmpDir, "/home/test")
-	statuses, err := runner.RunAll("pre-link", false, false, silent)
-	require.NoError(t, err)
-	assert.Nil(t, statuses)
-}
-
-func TestRunAll_AllOk(t *testing.T) {
-	tmpDir := t.TempDir()
-	hooksDir := filepath.Join(tmpDir, "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0755))
-
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "a.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "b.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
-
-	runner := New(hooksDir, tmpDir, "/home/test")
-	statuses, err := runner.RunAll("pre-link", false, false, silent)
-	require.NoError(t, err)
-
-	require.Len(t, statuses, 2)
-	for _, s := range statuses {
-		assert.True(t, s.Ok)
-	}
-}
-
-func TestRun_CapturesOutput(t *testing.T) {
-	tmpDir := t.TempDir()
-	hooksDir := filepath.Join(tmpDir, "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0755))
-
-	script := filepath.Join(hooksDir, "hello.sh")
-	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/bash
-echo "hello stdout"
-echo "hello stderr" >&2`), 0755))
-
-	runner := New(hooksDir, tmpDir, "/home/test")
-
-	var stdout, stderr bytes.Buffer
-	con := &console.Console{Stdout: &stdout, Stderr: &stderr}
-	err := runner.Run("pre-link", false, false, con)
-	require.NoError(t, err)
-	assert.Contains(t, stdout.String(), "hello stdout")
-	assert.Contains(t, stderr.String(), "hello stderr")
-}
-
-func TestRun_DiscardOutput(t *testing.T) {
-	tmpDir := t.TempDir()
-	hooksDir := filepath.Join(tmpDir, "hooks")
-	require.NoError(t, os.MkdirAll(hooksDir, 0755))
-
-	script := filepath.Join(hooksDir, "noisy.sh")
-	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/bash
-echo "noise"
-echo "error noise" >&2`), 0755))
-
-	runner := New(hooksDir, tmpDir, "/home/test")
-
-	err := runner.Run("pre-link", false, false, silent)
-	require.NoError(t, err)
 }

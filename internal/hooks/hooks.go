@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,8 +10,28 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"github.com/clutchski/dottie/internal/console"
 )
+
+// EventKind identifies what happened during hook execution.
+type EventKind int
+
+const (
+	Started EventKind = iota
+	Done
+)
+
+// Event is a lifecycle event emitted as hooks run.
+// For Done events, Err is nil on success or non-nil on failure.
+// Stdout and Stderr are populated on Done events with captured hook output.
+type Event struct {
+	Kind     EventKind
+	Hook     string        // full path to the hook script
+	Phase    string        // "pre-link", "post-link", or "status"
+	Duration time.Duration // set on Done
+	Err      error         // set on Done if hook failed
+	Stdout   []byte        // set on Done
+	Stderr   []byte        // set on Done
+}
 
 // Runner executes hook scripts.
 type Runner struct {
@@ -29,152 +50,6 @@ func New(hooksDir, rootDir, homeDir string) *Runner {
 		rootDir:  rootDir,
 		homeDir:  homeDir,
 	}
-}
-
-// Run executes all hooks with the given phase in parallel.
-// Phase should be one of: "pre-link", "post-link", "status".
-// Output is written to con.Stdout and con.Stderr.
-// Environment variables DOTTIE_ROOT, DOTTIE_HOME, and DOTTIE_DRY_RUN are set.
-func (r *Runner) Run(phase string, dryRun, verbose bool, con *console.Console) error {
-	scripts, err := r.List()
-	if err != nil {
-		return err
-	}
-
-	if len(scripts) == 0 {
-		return nil
-	}
-
-	if verbose {
-		fmt.Fprintf(con.Stdout, "\nhooks %s:\n", phase)
-	}
-
-	// Run all hooks in parallel
-	errors := make([]error, len(scripts))
-	var wg sync.WaitGroup
-	for i, script := range scripts {
-		wg.Add(1)
-		go func(idx int, path string) {
-			defer wg.Done()
-			name := DisplayName(filepath.Base(path))
-			if verbose {
-				fmt.Fprintf(con.Stdout, "  \033[33m◎\033[0m start: %s\n", name)
-			}
-			start := time.Now()
-			if err := r.runScript(path, phase, dryRun, con); err != nil {
-				errors[idx] = fmt.Errorf("hook %s failed: %w", name, err)
-				if verbose {
-					fmt.Fprintf(con.Stdout, "  \033[31mx\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
-				}
-			} else if verbose {
-				fmt.Fprintf(con.Stdout, "  \033[32m✓\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
-			}
-		}(i, script)
-	}
-	wg.Wait()
-
-	// Return first error if any
-	for _, err := range errors {
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// RunAll executes all hooks for a phase and returns per-hook results.
-// Unlike Run, it does not stop on the first error.
-func (r *Runner) RunAll(phase string, dryRun, verbose bool, con *console.Console) ([]HookStatus, error) {
-	scripts, err := r.List()
-	if err != nil {
-		return nil, err
-	}
-
-	if len(scripts) == 0 {
-		return nil, nil
-	}
-
-	if verbose {
-		fmt.Fprintf(con.Stdout, "\nhooks %s:\n", phase)
-	}
-
-	statuses := make([]HookStatus, len(scripts))
-	var wg sync.WaitGroup
-	for i, script := range scripts {
-		wg.Add(1)
-		go func(idx int, path string) {
-			defer wg.Done()
-			baseName := filepath.Base(path)
-			name := DisplayName(baseName)
-			if verbose {
-				fmt.Fprintf(con.Stdout, "  \033[33m◎\033[0m start: %s\n", name)
-			}
-			start := time.Now()
-			err := r.runScript(path, phase, dryRun, con)
-			statuses[idx] = HookStatus{Name: baseName, Ok: err == nil}
-			if verbose {
-				if err != nil {
-					fmt.Fprintf(con.Stdout, "  \033[31mx\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
-				} else {
-					fmt.Fprintf(con.Stdout, "  \033[32m✓\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
-				}
-			}
-		}(i, script)
-	}
-	wg.Wait()
-
-	return statuses, nil
-}
-
-// HookStatus represents the status of a single hook.
-type HookStatus struct {
-	Name string
-	Ok   bool
-}
-
-// StatusResult holds the results of hook status checks.
-type StatusResult struct {
-	Hooks []HookStatus
-	Err   error
-}
-
-// StartStatusCheck begins running all hooks with "status" phase in parallel.
-// Returns a channel that will receive the results when complete.
-func (r *Runner) StartStatusCheck() <-chan StatusResult {
-	ch := make(chan StatusResult, 1)
-
-	go func() {
-		scripts, err := r.List()
-		if err != nil {
-			ch <- StatusResult{Err: err}
-			return
-		}
-
-		if len(scripts) == 0 {
-			ch <- StatusResult{Hooks: nil}
-			return
-		}
-
-		// Run all hooks in parallel
-		statuses := make([]HookStatus, len(scripts))
-		var wg sync.WaitGroup
-		for i, script := range scripts {
-			wg.Add(1)
-			go func(idx int, path string) {
-				defer wg.Done()
-				statuses[idx] = HookStatus{
-					Name: filepath.Base(path),
-					Ok:   r.runStatusScript(path),
-				}
-			}(i, script)
-		}
-		wg.Wait()
-
-		ch <- StatusResult{Hooks: statuses}
-	}()
-
-	return ch
 }
 
 // List returns all active hook scripts (executable, non-hidden, non-example),
@@ -219,34 +94,69 @@ func (r *Runner) List() ([]string, error) {
 	return scripts, nil
 }
 
-// runStatusScript runs a hook with "status" phase silently and returns true if exit code is 0.
-func (r *Runner) runStatusScript(path string) bool {
-	cmd := exec.Command(path, "status")
-
-	// Set environment variables
-	cmd.Env = append(os.Environ(),
-		"DOTTIE_ROOT="+r.rootDir,
-		"DOTTIE_HOME="+r.homeDir,
-		"DOTTIE_DRY_RUN=false",
-	)
-
-	// Run silently - we only care about exit code
-	err := cmd.Run()
-	return err == nil
+// RunPreLink runs all hooks with "pre-link" phase in parallel.
+// Returns a channel of lifecycle events. The channel closes when all hooks complete.
+func (r *Runner) RunPreLink(dryRun bool) (<-chan Event, error) {
+	return r.run("pre-link", dryRun)
 }
 
-func (r *Runner) runScript(path, phase string, dryRun bool, con *console.Console) error {
-	cmd := exec.Command(path, phase)
-	cmd.Stdout = con.Stdout
-	cmd.Stderr = con.Stderr
+// RunPostLink runs all hooks with "post-link" phase in parallel.
+func (r *Runner) RunPostLink(dryRun bool) (<-chan Event, error) {
+	return r.run("post-link", dryRun)
+}
 
-	// Set environment variables
+// CheckStatus runs all hooks with "status" phase in parallel.
+func (r *Runner) CheckStatus() (<-chan Event, error) {
+	return r.run("status", false)
+}
+
+func (r *Runner) run(phase string, dryRun bool) (<-chan Event, error) {
+	scripts, err := r.List()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(scripts) == 0 {
+		ch := make(chan Event)
+		close(ch)
+		return ch, nil
+	}
+
+	events := make(chan Event, 2*len(scripts))
+
+	var wg sync.WaitGroup
+	for _, script := range scripts {
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			events <- Event{Kind: Started, Hook: path, Phase: phase}
+
+			start := time.Now()
+			var stdout, stderr bytes.Buffer
+			err := r.runScriptCapture(path, phase, dryRun, &stdout, &stderr)
+			dur := time.Since(start)
+
+			events <- Event{Kind: Done, Hook: path, Phase: phase, Duration: dur, Err: err, Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+		}(script)
+	}
+
+	go func() {
+		wg.Wait()
+		close(events)
+	}()
+
+	return events, nil
+}
+
+func (r *Runner) runScriptCapture(path, phase string, dryRun bool, stdout, stderr *bytes.Buffer) error {
+	cmd := exec.Command(path, phase)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	cmd.Env = append(os.Environ(),
 		"DOTTIE_ROOT="+r.rootDir,
 		"DOTTIE_HOME="+r.homeDir,
 		"DOTTIE_DRY_RUN="+boolToString(dryRun),
 	)
-
 	return cmd.Run()
 }
 
@@ -267,10 +177,3 @@ func boolToString(b bool) string {
 	return "false"
 }
 
-// DisplayName strips the file extension (e.g. "01-homebrew.sh" -> "01-homebrew").
-func DisplayName(name string) string {
-	if ext := filepath.Ext(name); ext != name {
-		return strings.TrimSuffix(name, ext)
-	}
-	return name
-}
