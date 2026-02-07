@@ -11,6 +11,37 @@ import (
 	"github.com/clutchski/dottie/internal/util"
 )
 
+// FileStatus represents the link status of a dotfile.
+type FileStatus int
+
+const (
+	FileStatusLinked FileStatus = iota
+	FileStatusMissing
+	FileStatusDiff
+)
+
+func (s FileStatus) String() string {
+	switch s {
+	case FileStatusLinked:
+		return "linked"
+	case FileStatusMissing:
+		return "unlinked"
+	case FileStatusDiff:
+		return "diff"
+	default:
+		return "unknown"
+	}
+}
+
+// FileInfo represents the status of a single dotfile.
+type FileInfo struct {
+	Name       string
+	SourcePath string
+	TargetPath string
+	Status     FileStatus
+	Message    string
+}
+
 // Status represents the result of a link operation.
 type Status int
 
@@ -266,4 +297,97 @@ func (l *linker) linkFile(source, target string, dryRun, force bool) Event {
 
 	result.Status = StatusLinked
 	return result
+}
+
+// CheckStatus returns the status of all dotfiles.
+func (l *linker) CheckStatus() ([]FileInfo, error) {
+	sourceDir := l.cfg.GetSourcePath()
+	return l.checkStatusDir(sourceDir, l.cfg.TargetDir, "", true)
+}
+
+// checkStatusDir recursively gets status of files in sourceDir.
+// prefix is used to build display names like "config/starship.toml".
+func (l *linker) checkStatusDir(sourceDir, targetDir, prefix string, topLevel bool) ([]FileInfo, error) {
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read source directory: %w", err)
+	}
+
+	var statuses []FileInfo
+
+	for _, entry := range entries {
+		name := entry.Name()
+
+		if l.cfg.ShouldIgnore(name) {
+			continue
+		}
+
+		sourcePath := filepath.Join(sourceDir, name)
+
+		var targetPath string
+		var displayName string
+		if topLevel {
+			targetPath = l.cfg.GetTargetPath(name)
+			displayName = name
+		} else {
+			targetPath = filepath.Join(targetDir, name)
+			displayName = filepath.Join(prefix, name)
+		}
+
+		if entry.IsDir() {
+			subStatuses, err := l.checkStatusDir(sourcePath, targetPath, displayName, false)
+			if err != nil {
+				return statuses, err
+			}
+			statuses = append(statuses, subStatuses...)
+			continue
+		}
+
+		info := l.checkFileStatus(sourcePath, targetPath)
+		info.Name = displayName
+		info.SourcePath = sourcePath
+		info.TargetPath = targetPath
+
+		statuses = append(statuses, info)
+	}
+
+	return statuses, nil
+}
+
+func (l *linker) checkFileStatus(source, target string) FileInfo {
+	info := FileInfo{}
+
+	if !util.FileExists(target) {
+		info.Status = FileStatusMissing
+		info.Message = "not linked"
+		return info
+	}
+
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		info.Status = FileStatusDiff
+		info.Message = "cannot resolve target path"
+		return info
+	}
+
+	resolvedSource, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		resolvedSource = source
+	}
+
+	if resolvedTarget == resolvedSource {
+		info.Status = FileStatusLinked
+		info.Message = "linked"
+		return info
+	}
+
+	if util.IsSymlink(target) {
+		linkTarget, _ := util.SymlinkTarget(target)
+		info.Status = FileStatusDiff
+		info.Message = fmt.Sprintf("symlink points to %s", linkTarget)
+	} else {
+		info.Status = FileStatusDiff
+		info.Message = "exists but not linked to repo"
+	}
+	return info
 }

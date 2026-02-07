@@ -14,7 +14,6 @@ import (
 	"github.com/clutchski/dottie/internal/hooks"
 	dotinit "github.com/clutchski/dottie/internal/init"
 	"github.com/clutchski/dottie/internal/link"
-	"github.com/clutchski/dottie/internal/status"
 	"github.com/clutchski/dottie/internal/update"
 )
 
@@ -451,19 +450,28 @@ func runStatus(args []string) int {
 		return 1
 	}
 
-	// Print dotfiles status while hooks run in background
-	checker := status.New(cfg)
-	var allOk bool
-	if *quiet {
-		allOk, _, err = checker.Check()
-	} else if *verbose {
-		allOk, err = checker.PrintVerbose(con.Stdout)
-	} else {
-		allOk, err = checker.PrintSummary(con.Stdout)
-	}
+	// Get dotfiles status while hooks run in background
+	linker := link.New(cfg)
+	statuses, err := linker.CheckStatus()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
+	}
+
+	allOk := true
+	for _, s := range statuses {
+		if s.Status != link.FileStatusLinked {
+			allOk = false
+			break
+		}
+	}
+
+	if !*quiet {
+		if *verbose {
+			printStatusVerbose(con.Stdout, statuses, cfg)
+		} else {
+			printStatusSummary(con.Stdout, statuses)
+		}
 	}
 
 	// Wait for hooks and print summary
@@ -571,6 +579,97 @@ func linkStatusSymbol(s link.Status) (symbol, color string) {
 	default:
 		return "?", colorReset
 	}
+}
+
+// printStatusVerbose prints the full per-file status listing.
+func printStatusVerbose(w io.Writer, statuses []link.FileInfo, cfg *config.Config) {
+	if len(statuses) == 0 {
+		return
+	}
+
+	maxWidth := 0
+	for _, s := range statuses {
+		displayTarget := formatTargetPath(s.TargetPath, cfg)
+		if len(displayTarget) > maxWidth {
+			maxWidth = len(displayTarget)
+		}
+	}
+
+	fmt.Fprintln(w, "Dotfiles:")
+	for _, s := range statuses {
+		var symbol, color, reason string
+		switch s.Status {
+		case link.FileStatusLinked:
+			symbol = "✓"
+			color = colorGreen
+		case link.FileStatusMissing:
+			symbol = "x"
+			color = colorRed
+			reason = "(not linked)"
+		case link.FileStatusDiff:
+			symbol = "!"
+			color = colorYellow
+			reason = "(" + s.Message + ")"
+		}
+
+		displayTarget := formatTargetPath(s.TargetPath, cfg)
+		displaySource := formatSourcePath(s.SourcePath)
+
+		if reason != "" {
+			fmt.Fprintf(w, "  %s%s%s %-*s  %s%s%s\n", color, symbol, colorReset, maxWidth, displayTarget, color, reason, colorReset)
+		} else {
+			fmt.Fprintf(w, "  %s%s%s %-*s -> %s\n", color, symbol, colorReset, maxWidth, displayTarget, displaySource)
+		}
+	}
+}
+
+// printStatusSummary prints a compact status using checkmark/x format.
+func printStatusSummary(w io.Writer, statuses []link.FileInfo) {
+	if len(statuses) == 0 {
+		return
+	}
+
+	okCount := 0
+	var problemNames []string
+	for _, s := range statuses {
+		if s.Status == link.FileStatusLinked {
+			okCount++
+		} else {
+			problemNames = append(problemNames, s.Name)
+		}
+	}
+
+	fmt.Fprintln(w, "dotfiles:")
+	if okCount > 0 {
+		fmt.Fprintf(w, "  %s✓%s %d ok\n", colorGreen, colorReset, okCount)
+	}
+	for _, name := range problemNames {
+		fmt.Fprintf(w, "  %sx%s %s\n", colorRed, colorReset, name)
+	}
+}
+
+// formatTargetPath formats the target path for display (replaces HOME with ~ only if target is HOME).
+func formatTargetPath(path string, cfg *config.Config) string {
+	home, _ := os.UserHomeDir()
+	targetDir := cfg.TargetDir
+
+	if targetDir == home && strings.HasPrefix(path, home) {
+		return "~" + strings.TrimPrefix(path, home)
+	}
+	return path
+}
+
+// formatSourcePath formats the source path for display (relative to repo root).
+func formatSourcePath(path string) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(cwd, path)
+	if err != nil {
+		return path
+	}
+	return rel
 }
 
 // hookDisplayName returns a display name from a hook path.
