@@ -325,10 +325,13 @@ func runStatus(args []string) int {
 }
 
 func loadConfig() (*config.Config, error) {
-	// Look for .dottie.yaml in current directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
+	}
+
+	if !config.IsDottieDir(cwd) {
+		return nil, fmt.Errorf("not a dottie directory; run 'dottie init' to create one")
 	}
 
 	return config.Load(cwd)
