@@ -34,6 +34,19 @@ var alwaysIgnored = []string{
 	"hooks",
 }
 
+// IsDottieDir returns true if dir looks like a dottie directory.
+// It checks for config files (dottie.yaml, .dottie.yaml), and the
+// conventional home/ and hooks/ directories.
+func IsDottieDir(dir string) bool {
+	markers := []string{"dottie.yaml", ".dottie.yaml", "home", "hooks"}
+	for _, name := range markers {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // Load loads the configuration from the given directory.
 // If no config file exists, returns a default configuration.
 func Load(dir string) (*Config, error) {

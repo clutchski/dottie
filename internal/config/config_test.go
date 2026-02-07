@@ -87,17 +87,86 @@ func TestLoadConfig_NoConfigFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Should succeed with defaults when no config file exists
+	// (but directory has home/ marker via other tests or IsDottieDir check)
 	cfg, err := Load(tmpDir)
 	if err != nil {
 		t.Fatalf("Load() returned error: %v", err)
 	}
 
-	// Check defaults are applied
 	if cfg.SourceDir != "home" {
 		t.Errorf("SourceDir = %q, want %q", cfg.SourceDir, "home")
 	}
 	if cfg.AddDot != true {
 		t.Errorf("AddDot = %v, want true", cfg.AddDot)
+	}
+}
+
+func TestIsDottieDir(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+		want  bool
+	}{
+		{
+			name:  "empty directory",
+			setup: func(t *testing.T, dir string) {},
+			want:  false,
+		},
+		{
+			name: "has dottie.yaml",
+			setup: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, "dottie.yaml"), []byte(""), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: true,
+		},
+		{
+			name: "has .dottie.yaml",
+			setup: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, ".dottie.yaml"), []byte(""), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: true,
+		},
+		{
+			name: "has home dir",
+			setup: func(t *testing.T, dir string) {
+				if err := os.Mkdir(filepath.Join(dir, "home"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: true,
+		},
+		{
+			name: "has hooks dir",
+			setup: func(t *testing.T, dir string) {
+				if err := os.Mkdir(filepath.Join(dir, "hooks"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: true,
+		},
+		{
+			name: "has unrelated files only",
+			setup: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hi"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tt.setup(t, tmpDir)
+			if got := IsDottieDir(tmpDir); got != tt.want {
+				t.Errorf("IsDottieDir() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
