@@ -548,6 +548,37 @@ func TestLink_ReplacesParentSymlinkWithDirectory(t *testing.T) {
 	assert.Equal(t, StatusLinked, results[0].Status)
 }
 
+func TestRun_StreamsEvents(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	bashrc := filepath.Join(sourceDir, "bashrc")
+	require.NoError(t, os.WriteFile(bashrc, []byte("export PATH"), 0644))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	ch, err := linker.Run(false, false)
+	require.NoError(t, err)
+
+	var events []Event
+	for ev := range ch {
+		events = append(events, ev)
+	}
+
+	assert.Len(t, events, 2)
+	for _, ev := range events {
+		assert.Equal(t, StatusLinked, ev.Status)
+	}
+}
+
 func TestComputeTargetPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	sourceDir := filepath.Join(tmpDir, "dotfiles")

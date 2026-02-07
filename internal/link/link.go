@@ -39,8 +39,8 @@ func (s Status) String() string {
 	}
 }
 
-// Result represents the outcome of linking a single file.
-type Result struct {
+// Event represents the outcome of linking a single file.
+type Event struct {
 	Source     string
 	Target     string
 	Status     Status
@@ -58,10 +58,10 @@ func New(cfg *config.Config) *linker {
 	return &linker{cfg: cfg}
 }
 
-// Link symlinks all dotfiles from source to target.
+// Run symlinks all dotfiles from source to target, streaming results as they happen.
 // If dryRun is true, no changes are made.
 // If force is true, existing files are overwritten without backup.
-func (l *linker) Link(dryRun, force bool) ([]Result, error) {
+func (l *linker) Run(dryRun, force bool) (<-chan Event, error) {
 	sources, err := l.collectSourcePaths()
 	if err != nil {
 		return nil, err
@@ -74,7 +74,31 @@ func (l *linker) Link(dryRun, force bool) ([]Result, error) {
 		}
 	}
 
-	return l.createLinks(sources, dryRun, force), nil
+	ch := make(chan Event, len(sources))
+	go func() {
+		defer close(ch)
+		sourceDir := l.cfg.GetSourcePath()
+		for _, source := range sources {
+			relPath, _ := filepath.Rel(sourceDir, source)
+			target := l.computeTargetPath(relPath)
+			ch <- l.linkFile(source, target, dryRun, force)
+		}
+	}()
+
+	return ch, nil
+}
+
+// Link symlinks all dotfiles, returning collected results.
+func (l *linker) Link(dryRun, force bool) ([]Event, error) {
+	ch, err := l.Run(dryRun, force)
+	if err != nil {
+		return nil, err
+	}
+	var events []Event
+	for ev := range ch {
+		events = append(events, ev)
+	}
+	return events, nil
 }
 
 // collectSourcePaths walks the source directory and collects all file paths.
@@ -157,19 +181,6 @@ func (l *linker) makeDirs(dirs []string) error {
 	return nil
 }
 
-// createLinks creates symlinks for all source files.
-func (l *linker) createLinks(sources []string, dryRun, force bool) []Result {
-	sourceDir := l.cfg.GetSourcePath()
-	var results []Result
-
-	for _, source := range sources {
-		relPath, _ := filepath.Rel(sourceDir, source)
-		target := l.computeTargetPath(relPath)
-		results = append(results, l.linkFile(source, target, dryRun, force))
-	}
-	return results
-}
-
 // computeTargetPath computes the target path for a file given its relative path.
 func (l *linker) computeTargetPath(relPath string) string {
 	parts := strings.Split(relPath, string(filepath.Separator))
@@ -183,8 +194,8 @@ func (l *linker) computeTargetPath(relPath string) string {
 	return filepath.Join(firstTarget, filepath.Join(parts[1:]...))
 }
 
-func (l *linker) linkFile(source, target string, dryRun, force bool) Result {
-	result := Result{
+func (l *linker) linkFile(source, target string, dryRun, force bool) Event {
+	result := Event{
 		Source: source,
 		Target: target,
 	}

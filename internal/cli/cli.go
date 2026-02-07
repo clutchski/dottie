@@ -150,40 +150,25 @@ func runRun(args []string) int {
 
 	// Link dotfiles
 	linker := link.New(cfg)
-	results, err := linker.Link(*dryRun, *force)
+	linkEvents, err := linker.Run(*dryRun, *force)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
 
-	// Print results based on verbosity
 	if *verbose {
 		fmt.Fprintln(con.Stdout, "dotfiles:")
 	}
-	for _, r := range results {
+	var results []link.Event
+	for r := range linkEvents {
+		results = append(results, r)
+
 		if r.BackupPath != "" {
 			fmt.Fprintf(con.Stdout, "backed up %s -> %s\n", r.Target, r.BackupPath)
 		}
 
 		if *verbose {
-			var symbol, color string
-			switch r.Status {
-			case link.StatusLinked:
-				symbol = "+"
-				color = colorGreen
-			case link.StatusWouldLink:
-				symbol = "~"
-				color = colorGreen
-			case link.StatusAlreadyLinked:
-				symbol = "✓"
-				color = colorGreen
-			case link.StatusSkipped:
-				symbol = "-"
-				color = colorRed
-			case link.StatusError:
-				symbol = "x"
-				color = colorRed
-			}
+			symbol, color := linkStatusSymbol(r.Status)
 			fmt.Fprintf(con.Stdout, "  %s%s%s %s -> %s\n", color, symbol, colorReset, filepath.Base(r.Source), r.Target)
 			if r.Error != nil {
 				fmt.Fprintf(con.Stderr, "    %v\n", r.Error)
@@ -209,11 +194,14 @@ func runRun(args []string) int {
 			hookOk[ev.Hook] = ev.Err == nil
 		}
 		for _, ev := range postDone {
-			if ev.Err != nil {
+			if _, seen := hookOk[ev.Hook]; !seen {
+				hookOk[ev.Hook] = ev.Err == nil
+			} else if ev.Err != nil {
 				hookOk[ev.Hook] = false
 			}
 		}
-		printHooksSummary(con.Stdout, preDone, hookOk)
+
+		printHooksSummary(con.Stdout, uniqueHookEvents(preDone, postDone), hookOk)
 	}
 
 	return 0
@@ -251,7 +239,7 @@ func processRunHooks(events <-chan hooks.Event, verbose bool, con *console.Conso
 }
 
 // printRunSummary prints the dotfiles summary line for a run.
-func printRunSummary(w io.Writer, results []link.Result) {
+func printRunSummary(w io.Writer, results []link.Event) {
 	added := 0
 	linked := 0
 	var errorNames []string
@@ -550,6 +538,39 @@ func printHooksSummary(w io.Writer, doneEvents []hooks.Event, hookOk map[string]
 	}
 
 	return len(failNames) == 0
+}
+
+// uniqueHookEvents combines done events from multiple phases, deduplicating by hook path.
+func uniqueHookEvents(phases ...[]hooks.Event) []hooks.Event {
+	seen := make(map[string]bool)
+	var all []hooks.Event
+	for _, phase := range phases {
+		for _, ev := range phase {
+			if !seen[ev.Hook] {
+				seen[ev.Hook] = true
+				all = append(all, ev)
+			}
+		}
+	}
+	return all
+}
+
+// linkStatusSymbol returns the symbol and color for a link status.
+func linkStatusSymbol(s link.Status) (symbol, color string) {
+	switch s {
+	case link.StatusLinked:
+		return "+", colorGreen
+	case link.StatusWouldLink:
+		return "~", colorGreen
+	case link.StatusAlreadyLinked:
+		return "✓", colorGreen
+	case link.StatusSkipped:
+		return "-", colorRed
+	case link.StatusError:
+		return "x", colorRed
+	default:
+		return "?", colorReset
+	}
 }
 
 // hookDisplayName returns a display name from a hook path.
