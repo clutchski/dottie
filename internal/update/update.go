@@ -10,24 +10,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/clutchski/dottie/internal/util"
 )
 
-var apiURL = "https://api.github.com/repos/clutchski/dottie/releases/latest"
-var downloadURL = "https://github.com/clutchski/dottie/releases/download"
+const defaultAPIURL = "https://api.github.com/repos/clutchski/dottie/releases/latest"
+const defaultDownloadURL = "https://github.com/clutchski/dottie/releases/download"
 
-var executablePath = func() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	return filepath.EvalSymlinks(exe)
-}
+var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 // fetchLatestVersion queries the GitHub API for the latest release tag.
-func fetchLatestVersion() (string, error) {
-	resp, err := http.Get(apiURL)
+func fetchLatestVersion(apiURL string) (string, error) {
+	resp, err := httpClient.Get(apiURL)
 	if err != nil {
 		return "", fmt.Errorf("fetching latest version: %w", err)
 	}
@@ -102,9 +97,9 @@ func atomicReplace(srcPath, destPath string) error {
 	return nil
 }
 
-// installBinary downloads a tarball from url and installs the dottie binary to targetPath.
-func installBinary(url, targetPath string) error {
-	resp, err := http.Get(url)
+// downloadAndInstall downloads a tarball from url and installs the dottie binary to targetPath.
+func downloadAndInstall(url, targetPath string) error {
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return fmt.Errorf("downloading release: %w", err)
 	}
@@ -131,23 +126,12 @@ func installBinary(url, targetPath string) error {
 	return atomicReplace(tmpPath, targetPath)
 }
 
-func downloadAndInstall(version string) error {
-	osName := capitalizeOS(util.DetectOS())
-	arch := util.DetectArch()
-	tarballName := fmt.Sprintf("dottie_%s_%s_%s.tar.gz", version, osName, arch)
-	url := fmt.Sprintf("%s/v%s/%s", downloadURL, version, tarballName)
-
-	exePath, err := executablePath()
+func resolveExecutable() (string, error) {
+	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("locating executable: %w", err)
+		return "", fmt.Errorf("locating executable: %w", err)
 	}
-
-	if err := installBinary(url, exePath); err != nil {
-		return err
-	}
-
-	fmt.Printf("Updated dottie to %s (%s/%s) -> %s\n", version, osName, arch, exePath)
-	return nil
+	return filepath.EvalSymlinks(exe)
 }
 
 // VersionStatus holds the result of an async version check.
@@ -157,11 +141,11 @@ type VersionStatus struct {
 	Err      error
 }
 
-// GetVersion starts an async version check and returns a channel with the result.
-func GetVersion(currentVersion string) <-chan VersionStatus {
+// GetVersionFrom starts an async version check against apiURL and returns a channel with the result.
+func GetVersionFrom(currentVersion, apiURL string) <-chan VersionStatus {
 	ch := make(chan VersionStatus, 1)
 	go func() {
-		latest, err := fetchLatestVersion()
+		latest, err := fetchLatestVersion(apiURL)
 		if err != nil {
 			ch <- VersionStatus{Err: err}
 			return
@@ -174,11 +158,15 @@ func GetVersion(currentVersion string) <-chan VersionStatus {
 	return ch
 }
 
-// Run downloads and installs the latest release to update dottie.
-// If currentVersion matches the latest release, it prints a message and returns.
-// If currentVersion is "dev", the check is skipped and it always updates.
-func Run(currentVersion string) error {
-	latest, err := fetchLatestVersion()
+// GetVersion starts an async version check and returns a channel with the result.
+func GetVersion(currentVersion string) <-chan VersionStatus {
+	return GetVersionFrom(currentVersion, defaultAPIURL)
+}
+
+// InstallFrom fetches the latest version from apiURL, downloads the release from
+// baseDownloadURL, and installs it to exePath. It is the test-friendly variant of Install.
+func InstallFrom(currentVersion, apiURL, baseDownloadURL, exePath string) error {
+	latest, err := fetchLatestVersion(apiURL)
 	if err != nil {
 		return err
 	}
@@ -188,5 +176,27 @@ func Run(currentVersion string) error {
 		return nil
 	}
 
-	return downloadAndInstall(normalizeVersion(latest))
+	version := normalizeVersion(latest)
+	osName := capitalizeOS(util.DetectOS())
+	arch := util.DetectArch()
+	tarballName := fmt.Sprintf("dottie_%s_%s_%s.tar.gz", version, osName, arch)
+	downloadURL := fmt.Sprintf("%s/v%s/%s", baseDownloadURL, version, tarballName)
+
+	if err := downloadAndInstall(downloadURL, exePath); err != nil {
+		return err
+	}
+
+	fmt.Printf("Updated dottie to %s (%s/%s) -> %s\n", version, osName, arch, exePath)
+	return nil
+}
+
+// Install downloads and installs the latest release to update dottie.
+// If currentVersion matches the latest release, it prints a message and returns.
+// If currentVersion is "dev", the check is skipped and it always updates.
+func Install(currentVersion string) error {
+	exePath, err := resolveExecutable()
+	if err != nil {
+		return err
+	}
+	return InstallFrom(currentVersion, defaultAPIURL, defaultDownloadURL, exePath)
 }

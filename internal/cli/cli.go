@@ -465,7 +465,7 @@ func printHooksSummary(w io.Writer, hookStatuses []hooks.HookStatus) bool {
 }
 
 func runUpdate() int {
-	if err := update.Run(version); err != nil {
+	if err := update.Install(version); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}

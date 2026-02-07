@@ -90,19 +90,11 @@ func TestDownloadAndInstall(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origDownloadURL := downloadURL
-	downloadURL = srv.URL
-	defer func() { downloadURL = origDownloadURL }()
-
 	tmpDir := t.TempDir()
 	target := filepath.Join(tmpDir, "dottie")
 	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
 
-	origExecPath := executablePath
-	executablePath = func() (string, error) { return target, nil }
-	defer func() { executablePath = origExecPath }()
-
-	err := downloadAndInstall("1.2.3")
+	err := downloadAndInstall(srv.URL+"/tarball", target)
 	require.NoError(t, err)
 
 	got, err := os.ReadFile(target)
@@ -120,46 +112,32 @@ func TestFetchLatestVersion(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origURL := apiURL
-	apiURL = srv.URL
-	defer func() { apiURL = origURL }()
-
-	got, err := fetchLatestVersion()
+	got, err := fetchLatestVersion(srv.URL)
 	require.NoError(t, err)
 	assert.Equal(t, "v1.2.3", got)
 }
 
-func TestRunSkipsWhenUpToDate(t *testing.T) {
+func TestInstallFromSkipsWhenUpToDate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, `{"tag_name": "v1.2.3"}`)
 	}))
 	defer srv.Close()
 
-	origURL := apiURL
-	apiURL = srv.URL
-	defer func() { apiURL = origURL }()
-
-	// Should return nil without running install (passing matching version)
-	err := Run("v1.2.3")
+	err := InstallFrom("v1.2.3", srv.URL, srv.URL, "/unused")
 	assert.NoError(t, err)
 }
 
-func TestRunSkipsWhenUpToDateWithoutPrefix(t *testing.T) {
+func TestInstallFromSkipsWhenUpToDateWithoutPrefix(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, `{"tag_name": "v1.2.3"}`)
 	}))
 	defer srv.Close()
 
-	origURL := apiURL
-	apiURL = srv.URL
-	defer func() { apiURL = origURL }()
-
-	// Should match even without the v prefix
-	err := Run("1.2.3")
+	err := InstallFrom("1.2.3", srv.URL, srv.URL, "/unused")
 	assert.NoError(t, err)
 }
 
-func TestRunProceedsWhenOutdated(t *testing.T) {
+func TestInstallFromProceedsWhenOutdated(t *testing.T) {
 	tarball := createTarGz(t, "dottie", []byte("new-binary"))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -171,23 +149,11 @@ func TestRunProceedsWhenOutdated(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origURL := apiURL
-	apiURL = srv.URL
-	defer func() { apiURL = origURL }()
-
-	origDownloadURL := downloadURL
-	downloadURL = srv.URL
-	defer func() { downloadURL = origDownloadURL }()
-
 	tmpDir := t.TempDir()
 	target := filepath.Join(tmpDir, "dottie")
 	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
 
-	origExecPath := executablePath
-	executablePath = func() (string, error) { return target, nil }
-	defer func() { executablePath = origExecPath }()
-
-	err := Run("v1.0.0")
+	err := InstallFrom("v1.0.0", srv.URL, srv.URL, target)
 	require.NoError(t, err)
 
 	got, err := os.ReadFile(target)
@@ -195,7 +161,7 @@ func TestRunProceedsWhenOutdated(t *testing.T) {
 	assert.Equal(t, "new-binary", string(got))
 }
 
-func TestRunSkipsCheckForDevVersion(t *testing.T) {
+func TestInstallFromSkipsCheckForDevVersion(t *testing.T) {
 	tarball := createTarGz(t, "dottie", []byte("dev-binary"))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -207,23 +173,11 @@ func TestRunSkipsCheckForDevVersion(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origURL := apiURL
-	apiURL = srv.URL
-	defer func() { apiURL = origURL }()
-
-	origDownloadURL := downloadURL
-	downloadURL = srv.URL
-	defer func() { downloadURL = origDownloadURL }()
-
 	tmpDir := t.TempDir()
 	target := filepath.Join(tmpDir, "dottie")
 	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
 
-	origExecPath := executablePath
-	executablePath = func() (string, error) { return target, nil }
-	defer func() { executablePath = origExecPath }()
-
-	err := Run("dev")
+	err := InstallFrom("dev", srv.URL, srv.URL, target)
 	require.NoError(t, err)
 
 	got, err := os.ReadFile(target)
@@ -231,33 +185,25 @@ func TestRunSkipsCheckForDevVersion(t *testing.T) {
 	assert.Equal(t, "dev-binary", string(got))
 }
 
-func TestGetVersionUpToDate(t *testing.T) {
+func TestGetVersionFromUpToDate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, `{"tag_name": "v1.2.3"}`)
 	}))
 	defer srv.Close()
 
-	origURL := apiURL
-	apiURL = srv.URL
-	defer func() { apiURL = origURL }()
-
-	result := <-GetVersion("v1.2.3")
+	result := <-GetVersionFrom("v1.2.3", srv.URL)
 	require.NoError(t, result.Err)
 	assert.Equal(t, "v1.2.3", result.Latest)
 	assert.True(t, result.UpToDate)
 }
 
-func TestGetVersionOutdated(t *testing.T) {
+func TestGetVersionFromOutdated(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, `{"tag_name": "v2.0.0"}`)
 	}))
 	defer srv.Close()
 
-	origURL := apiURL
-	apiURL = srv.URL
-	defer func() { apiURL = origURL }()
-
-	result := <-GetVersion("v1.0.0")
+	result := <-GetVersionFrom("v1.0.0", srv.URL)
 	require.NoError(t, result.Err)
 	assert.Equal(t, "v2.0.0", result.Latest)
 	assert.False(t, result.UpToDate)
