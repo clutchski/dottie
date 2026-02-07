@@ -23,7 +23,8 @@ type Config struct {
 	HooksDir  string   `yaml:"hooks_dir"`
 
 	// Internal fields
-	repoRoot string
+	repoRoot   string
+	configFile string
 }
 
 // alwaysIgnored are paths that are always ignored when linking.
@@ -66,20 +67,25 @@ func Load(dir string) (*Config, error) {
 	// Try each config file name
 	var data []byte
 	var err error
+	var foundName string
 	for _, name := range ConfigFileNames {
 		configPath := filepath.Join(dir, name)
 		data, err = os.ReadFile(configPath)
 		if err == nil {
+			foundName = name
 			break
 		}
 	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No config file - use defaults
+			cfg.configFile = "defaults"
 			return cfg, nil
 		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
+
+	cfg.configFile = foundName
 
 	if len(data) > 0 {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
@@ -184,4 +190,9 @@ func (c *Config) GetBackupPath() (string, error) {
 // RepoRoot returns the root directory of the dotfiles repository.
 func (c *Config) RepoRoot() string {
 	return c.repoRoot
+}
+
+// File returns the name of the loaded config file, or "defaults" if none.
+func (c *Config) File() string {
+	return c.configFile
 }

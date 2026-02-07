@@ -9,6 +9,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+
+	"github.com/clutchski/dottie/internal/console"
 )
 
 // Runner executes hook scripts.
@@ -32,8 +35,9 @@ func New(hooksDir, rootDir, homeDir string) *Runner {
 
 // Run executes all hooks with the given phase in parallel.
 // Phase should be one of: "pre-link", "post-link", "status".
+// Output is written to con.Stdout and con.Stderr.
 // Environment variables DOTTIE_ROOT, DOTTIE_HOME, and DOTTIE_DRY_RUN are set.
-func (r *Runner) Run(phase string, dryRun, verbose bool) error {
+func (r *Runner) Run(phase string, dryRun, verbose bool, con *console.Console) error {
 	scripts, err := r.List()
 	if err != nil {
 		return err
@@ -43,6 +47,10 @@ func (r *Runner) Run(phase string, dryRun, verbose bool) error {
 		return nil
 	}
 
+	if verbose {
+		fmt.Fprintf(con.Stdout, "\nhooks %s:\n", phase)
+	}
+
 	// Run all hooks in parallel
 	errors := make([]error, len(scripts))
 	var wg sync.WaitGroup
@@ -50,16 +58,18 @@ func (r *Runner) Run(phase string, dryRun, verbose bool) error {
 		wg.Add(1)
 		go func(idx int, path string) {
 			defer wg.Done()
-			name := filepath.Base(path)
+			name := DisplayName(filepath.Base(path))
 			if verbose {
-				fmt.Printf("[hook] [start] %s\n", name)
+				fmt.Fprintf(con.Stdout, "  \033[33m◎\033[0m start: %s\n", name)
 			}
 			start := time.Now()
-			if err := r.runScript(path, phase, dryRun); err != nil {
+			if err := r.runScript(path, phase, dryRun, con); err != nil {
 				errors[idx] = fmt.Errorf("hook %s failed: %w", name, err)
-			}
-			if verbose {
-				fmt.Printf("[hook] [done]  [%.1fs] %s\n", time.Since(start).Seconds(), name)
+				if verbose {
+					fmt.Fprintf(con.Stdout, "  \033[31mx\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
+				}
+			} else if verbose {
+				fmt.Fprintf(con.Stdout, "  \033[32m✓\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
 			}
 		}(i, script)
 	}
@@ -73,6 +83,50 @@ func (r *Runner) Run(phase string, dryRun, verbose bool) error {
 	}
 
 	return nil
+}
+
+// RunAll executes all hooks for a phase and returns per-hook results.
+// Unlike Run, it does not stop on the first error.
+func (r *Runner) RunAll(phase string, dryRun, verbose bool, con *console.Console) ([]HookStatus, error) {
+	scripts, err := r.List()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(scripts) == 0 {
+		return nil, nil
+	}
+
+	if verbose {
+		fmt.Fprintf(con.Stdout, "\nhooks %s:\n", phase)
+	}
+
+	statuses := make([]HookStatus, len(scripts))
+	var wg sync.WaitGroup
+	for i, script := range scripts {
+		wg.Add(1)
+		go func(idx int, path string) {
+			defer wg.Done()
+			baseName := filepath.Base(path)
+			name := DisplayName(baseName)
+			if verbose {
+				fmt.Fprintf(con.Stdout, "  \033[33m◎\033[0m start: %s\n", name)
+			}
+			start := time.Now()
+			err := r.runScript(path, phase, dryRun, con)
+			statuses[idx] = HookStatus{Name: baseName, Ok: err == nil}
+			if verbose {
+				if err != nil {
+					fmt.Fprintf(con.Stdout, "  \033[31mx\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
+				} else {
+					fmt.Fprintf(con.Stdout, "  \033[32m✓\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
+				}
+			}
+		}(i, script)
+	}
+	wg.Wait()
+
+	return statuses, nil
 }
 
 // HookStatus represents the status of a single hook.
@@ -183,10 +237,10 @@ func (r *Runner) runStatusScript(path string) bool {
 	return err == nil
 }
 
-func (r *Runner) runScript(path, phase string, dryRun bool) error {
+func (r *Runner) runScript(path, phase string, dryRun bool, con *console.Console) error {
 	cmd := exec.Command(path, phase)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = con.Stdout
+	cmd.Stderr = con.Stderr
 
 	// Set environment variables
 	cmd.Env = append(os.Environ(),
@@ -213,4 +267,24 @@ func boolToString(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// DisplayName strips the file extension and any leading numeric prefix
+// (e.g. "01-homebrew.sh" -> "homebrew").
+func DisplayName(name string) string {
+	name = strings.TrimSuffix(name, filepath.Ext(name))
+	if i := strings.IndexByte(name, '-'); i >= 0 {
+		prefix := name[:i]
+		allDigits := len(prefix) > 0
+		for _, c := range prefix {
+			if !unicode.IsDigit(c) {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			name = name[i+1:]
+		}
+	}
+	return name
 }

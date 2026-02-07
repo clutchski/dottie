@@ -170,6 +170,55 @@ func TestIsDottieDir(t *testing.T) {
 	}
 }
 
+func TestConfigFile_WithFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	configPath := filepath.Join(tmpDir, "dottie.yaml")
+	if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to create config file: %v", err)
+	}
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if got := cfg.File(); got != "dottie.yaml" {
+		t.Errorf("ConfigFile() = %q, want %q", got, "dottie.yaml")
+	}
+}
+
+func TestConfigFile_WithDotFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	configPath := filepath.Join(tmpDir, ".dottie.yaml")
+	if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to create config file: %v", err)
+	}
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if got := cfg.File(); got != ".dottie.yaml" {
+		t.Errorf("ConfigFile() = %q, want %q", got, ".dottie.yaml")
+	}
+}
+
+func TestConfigFile_NoFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if got := cfg.File(); got != "defaults" {
+		t.Errorf("ConfigFile() = %q, want %q", got, "defaults")
+	}
+}
+
 func TestConfig_ShouldIgnore(t *testing.T) {
 	cfg := &Config{
 		Ignore: []string{"README.md", "LICENSE", "*.bak"},

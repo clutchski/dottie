@@ -56,6 +56,7 @@ type linker struct {
 // New creates a new linker.
 func New(cfg *config.Config) *linker {
 	return &linker{cfg: cfg}
+
 }
 
 // Link symlinks all dotfiles from source to target.

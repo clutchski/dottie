@@ -1,13 +1,18 @@
 package hooks
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/clutchski/dottie/internal/console"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var silent = &console.Console{Stdout: io.Discard, Stderr: io.Discard}
 
 func TestRun_ExecutesAllScripts(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -25,7 +30,7 @@ echo "first" >> `+outputFile), 0755))
 echo "second" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false)
+	err := runner.Run("pre-link", false, false, silent)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -47,9 +52,9 @@ echo "$1" >> `+outputFile), 0755))
 	runner := New(hooksDir, tmpDir, "/home/test")
 
 	// Test different phases
-	require.NoError(t, runner.Run("pre-link", false, false))
-	require.NoError(t, runner.Run("post-link", false, false))
-	require.NoError(t, runner.Run("status", false, false))
+	require.NoError(t, runner.Run("pre-link", false, false, silent))
+	require.NoError(t, runner.Run("post-link", false, false, silent))
+	require.NoError(t, runner.Run("status", false, false, silent))
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
@@ -69,7 +74,7 @@ echo "HOME=$DOTTIE_HOME" >> `+outputFile+`
 echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, "/my/dotfiles", "/home/user")
-	err := runner.Run("pre-link", false, false)
+	err := runner.Run("pre-link", false, false, silent)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -91,7 +96,7 @@ func TestRun_DryRunSetsEnvVar(t *testing.T) {
 echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", true, false) // dry-run
+	err := runner.Run("pre-link", true, false, silent)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -103,7 +108,7 @@ func TestRun_SkipsMissingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	runner := New(filepath.Join(tmpDir, "nonexistent"), tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false)
+	err := runner.Run("pre-link", false, false, silent)
 	require.NoError(t, err) // Should not error on missing dir
 }
 
@@ -124,7 +129,7 @@ echo "hidden" >> `+outputFile), 0755))
 echo "normal" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false)
+	err := runner.Run("pre-link", false, false, silent)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -149,7 +154,7 @@ echo "example" >> `+outputFile), 0755))
 echo "normal" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false)
+	err := runner.Run("pre-link", false, false, silent)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -173,7 +178,7 @@ func TestRun_SkipsNonExecutableFiles(t *testing.T) {
 echo "exec" >> `+outputFile), 0755))
 
 	runner := New(hooksDir, tmpDir, "/home/test")
-	err := runner.Run("pre-link", false, false)
+	err := runner.Run("pre-link", false, false, silent)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(outputFile)
@@ -264,4 +269,40 @@ func TestStartStatusCheck_MissingDirectory(t *testing.T) {
 	result := <-runner.StartStatusCheck()
 	require.NoError(t, result.Err)
 	assert.Empty(t, result.Hooks)
+}
+
+func TestRun_CapturesOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
+
+	script := filepath.Join(hooksDir, "hello.sh")
+	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/bash
+echo "hello stdout"
+echo "hello stderr" >&2`), 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+
+	var stdout, stderr bytes.Buffer
+	con := &console.Console{Stdout: &stdout, Stderr: &stderr}
+	err := runner.Run("pre-link", false, false, con)
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "hello stdout")
+	assert.Contains(t, stderr.String(), "hello stderr")
+}
+
+func TestRun_DiscardOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
+
+	script := filepath.Join(hooksDir, "noisy.sh")
+	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/bash
+echo "noise"
+echo "error noise" >&2`), 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+
+	err := runner.Run("pre-link", false, false, silent)
+	require.NoError(t, err)
 }

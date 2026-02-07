@@ -2,32 +2,14 @@ package status
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/clutchski/dottie/internal/config"
 	"github.com/clutchski/dottie/internal/util"
 )
-
-// defaultPatterns are known dotfile patterns to scan for in HOME.
-var defaultPatterns = []string{
-	// Shell configs
-	".bashrc", ".bash_profile", ".zshrc", ".zshenv", ".zprofile", ".profile",
-
-	// Editors
-	".vimrc", ".vim/", ".emacs", ".emacs.d/",
-
-	// Git
-	".gitconfig", ".gitignore_global",
-
-	// Terminal
-	".tmux.conf", ".inputrc",
-
-	// XDG config - scan all immediate children
-	".config/*",
-}
 
 // FileStatus represents the link status of a dotfile.
 type FileStatus int
@@ -36,7 +18,6 @@ const (
 	FileStatusLinked FileStatus = iota
 	FileStatusMissing
 	FileStatusDiff
-	FileStatusUntracked
 )
 
 func (s FileStatus) String() string {
@@ -47,8 +28,6 @@ func (s FileStatus) String() string {
 		return "unlinked"
 	case FileStatusDiff:
 		return "diff"
-	case FileStatusUntracked:
-		return "untracked"
 	default:
 		return "unknown"
 	}
@@ -171,157 +150,18 @@ func (c *Checker) checkFile(source, target string) DotfileStatus {
 	return status
 }
 
-// GetStatusScan scans HOME for known dotfile patterns and returns their status.
-func (c *Checker) GetStatusScan() ([]DotfileStatus, error) {
-	home := c.cfg.TargetDir
-	sourceDir := c.cfg.GetSourcePath()
-
-	var statuses []DotfileStatus
-	seen := make(map[string]bool)
-
-	// Scan known patterns in HOME
-	for _, pattern := range defaultPatterns {
-		if strings.HasSuffix(pattern, "/*") {
-			// Expand wildcard pattern (e.g., .config/*)
-			dir := strings.TrimSuffix(pattern, "/*")
-			dirPath := filepath.Join(home, dir)
-
-			// Skip if the parent directory is already a symlink to repo
-			// (its contents are already covered by the parent)
-			if util.IsSymlink(dirPath) {
-				continue
-			}
-
-			entries, err := os.ReadDir(dirPath)
-			if err != nil {
-				continue // directory doesn't exist, skip
-			}
-			for _, entry := range entries {
-				targetPath := filepath.Join(dirPath, entry.Name())
-				status := c.checkTargetFile(targetPath, sourceDir, home)
-				if status != nil && !seen[status.TargetPath] {
-					seen[status.TargetPath] = true
-					statuses = append(statuses, *status)
-				}
-			}
-		} else {
-			// Direct pattern
-			targetPath := filepath.Join(home, pattern)
-			status := c.checkTargetFile(targetPath, sourceDir, home)
-			if status != nil && !seen[status.TargetPath] {
-				seen[status.TargetPath] = true
-				statuses = append(statuses, *status)
-			}
-		}
-	}
-
-	// Also check repo files that might not match patterns (for "missing" status)
-	repoStatuses, err := c.GetStatus()
-	if err != nil {
-		return nil, err
-	}
-	for _, rs := range repoStatuses {
-		if !seen[rs.TargetPath] {
-			seen[rs.TargetPath] = true
-			statuses = append(statuses, rs)
-		}
-	}
-
-	// Sort by status (ok, diff, missing, untracked) then by path
-	sort.Slice(statuses, func(i, j int) bool {
-		if statuses[i].Status != statuses[j].Status {
-			return statuses[i].Status < statuses[j].Status
-		}
-		return statuses[i].TargetPath < statuses[j].TargetPath
-	})
-
-	return statuses, nil
-}
-
-// checkTargetFile checks a file in the target directory and returns its status.
-// Directories are skipped - only files are reported.
-func (c *Checker) checkTargetFile(targetPath, sourceDir, home string) *DotfileStatus {
-	if !util.FileExists(targetPath) {
-		return nil // doesn't exist
-	}
-
-	// Skip directories - only report files
-	if util.IsDir(targetPath) && !util.IsSymlink(targetPath) {
-		return nil
-	}
-
-	// Calculate the expected source path
-	relPath, err := filepath.Rel(home, targetPath)
-	if err != nil {
-		return nil
-	}
-
-	// Convert target name to source name (remove leading dots if add_dot is true)
-	// e.g., .vimrc -> vimrc, .config/starship.toml -> config/starship.toml
-	sourceName := relPath
-	if c.cfg.AddDot {
-		parts := strings.Split(relPath, string(filepath.Separator))
-		for i, part := range parts {
-			if strings.HasPrefix(part, ".") {
-				parts[i] = strings.TrimPrefix(part, ".")
-			}
-		}
-		sourceName = filepath.Join(parts...)
-	}
-
-	sourcePath := filepath.Join(sourceDir, sourceName)
-
-	status := &DotfileStatus{
-		Name:       relPath,
-		SourcePath: sourcePath,
-		TargetPath: targetPath,
-	}
-
-	// Check if source exists in repo
-	if !util.FileExists(sourcePath) {
-		status.Status = FileStatusUntracked
-		status.Message = "not in repo"
-		return status
-	}
-
-	// Check if it's properly linked
-	if !util.IsSymlink(targetPath) {
-		status.Status = FileStatusDiff
-		status.Message = "exists but not a symlink"
-		return status
-	}
-
-	linkTarget, err := util.SymlinkTarget(targetPath)
-	if err != nil {
-		status.Status = FileStatusDiff
-		status.Message = "cannot read symlink target"
-		return status
-	}
-
-	if linkTarget != sourcePath {
-		status.Status = FileStatusDiff
-		status.Message = fmt.Sprintf("symlink points to %s", linkTarget)
-		return status
-	}
-
-	status.Status = FileStatusLinked
-	status.Message = "linked"
-	return status
-}
-
 // ANSI color codes
 const (
 	colorReset  = "\033[0m"
 	colorGreen  = "\033[32m"
 	colorRed    = "\033[31m"
 	colorYellow = "\033[33m"
-	colorGray   = "\033[90m"
 )
 
 // Check returns true if all dotfiles are in sync, false otherwise.
 // Also returns the list of statuses for display.
 func (c *Checker) Check() (bool, []DotfileStatus, error) {
-	statuses, err := c.GetStatusScan()
+	statuses, err := c.GetStatus()
 	if err != nil {
 		return false, nil, err
 	}
@@ -337,9 +177,15 @@ func (c *Checker) Check() (bool, []DotfileStatus, error) {
 	return allOk, statuses, nil
 }
 
-// Print prints the status to stdout.
+// Print prints the verbose status to stdout.
 // Returns true if all dotfiles are in sync.
 func (c *Checker) Print() (bool, error) {
+	return c.PrintVerbose(os.Stdout)
+}
+
+// PrintVerbose prints the full per-file status listing.
+// Returns true if all dotfiles are in sync.
+func (c *Checker) PrintVerbose(w io.Writer) (bool, error) {
 	allOk, statuses, err := c.Check()
 	if err != nil {
 		return false, err
@@ -358,7 +204,7 @@ func (c *Checker) Print() (bool, error) {
 		}
 	}
 
-	fmt.Println("Dotfiles:")
+	fmt.Fprintln(w, "Dotfiles:")
 	for _, s := range statuses {
 		var symbol, color, reason string
 		switch s.Status {
@@ -373,20 +219,50 @@ func (c *Checker) Print() (bool, error) {
 			symbol = "!"
 			color = colorYellow
 			reason = "(" + s.Message + ")"
-		case FileStatusUntracked:
-			symbol = "?"
-			color = colorGray
-			reason = "(not in repo)"
 		}
 
 		displayTarget := c.formatTargetPath(s.TargetPath)
 		displaySource := c.formatSourcePath(s.SourcePath)
 
 		if reason != "" {
-			fmt.Printf("  %s[%s]%s %-*s  %s%s%s\n", color, symbol, colorReset, maxWidth, displayTarget, color, reason, colorReset)
+			fmt.Fprintf(w, "  %s%s%s %-*s  %s%s%s\n", color, symbol, colorReset, maxWidth, displayTarget, color, reason, colorReset)
 		} else {
-			fmt.Printf("  %s[%s]%s %-*s -> %s\n", color, symbol, colorReset, maxWidth, displayTarget, displaySource)
+			fmt.Fprintf(w, "  %s%s%s %-*s -> %s\n", color, symbol, colorReset, maxWidth, displayTarget, displaySource)
 		}
+	}
+
+	return allOk, nil
+}
+
+// PrintSummary prints a compact status using [ok]/[x] format.
+// Returns true if all dotfiles are in sync.
+func (c *Checker) PrintSummary(w io.Writer) (bool, error) {
+	allOk, statuses, err := c.Check()
+	if err != nil {
+		return false, err
+	}
+
+	if len(statuses) == 0 {
+		return true, nil
+	}
+
+	// Collect ok count and problem names
+	okCount := 0
+	var problemNames []string
+	for _, s := range statuses {
+		if s.Status == FileStatusLinked {
+			okCount++
+		} else {
+			problemNames = append(problemNames, s.Name)
+		}
+	}
+
+	fmt.Fprintln(w, "dotfiles:")
+	if okCount > 0 {
+		fmt.Fprintf(w, "  %s✓%s %d ok\n", colorGreen, colorReset, okCount)
+	}
+	for _, name := range problemNames {
+		fmt.Fprintf(w, "  %sx%s %s\n", colorRed, colorReset, name)
 	}
 
 	return allOk, nil
