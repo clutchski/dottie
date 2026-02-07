@@ -178,29 +178,15 @@ func GetVersion(currentVersion string) <-chan VersionStatus {
 // If currentVersion matches the latest release, it prints a message and returns.
 // If currentVersion is "dev", the check is skipped and it always updates.
 func Run(currentVersion string) error {
-	latest := ""
-	if currentVersion != "dev" {
-		var err error
-		latest, err = fetchLatestVersion()
-		if err != nil {
-			return err
-		}
-		if normalizeVersion(currentVersion) == normalizeVersion(latest) {
-			fmt.Printf("dottie is already up to date (%s)\n", latest)
-			return nil
-		}
+	latest, err := fetchLatestVersion()
+	if err != nil {
+		return err
 	}
 
-	version := normalizeVersion(latest)
-	if currentVersion == "dev" {
-		// For dev builds, fetch the latest to know what version to download
-		var err error
-		latest, err = fetchLatestVersion()
-		if err != nil {
-			return err
-		}
-		version = normalizeVersion(latest)
+	if currentVersion != "dev" && normalizeVersion(currentVersion) == normalizeVersion(latest) {
+		fmt.Printf("dottie is already up to date (%s)\n", latest)
+		return nil
 	}
 
-	return downloadAndInstall(version)
+	return downloadAndInstall(normalizeVersion(latest))
 }
