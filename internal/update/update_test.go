@@ -36,6 +36,52 @@ func createTarGz(t *testing.T, filename string, content []byte) []byte {
 	return buf.Bytes()
 }
 
+func TestExtractBinary(t *testing.T) {
+	tarball := createTarGz(t, "dottie", []byte("the-binary"))
+
+	var buf bytes.Buffer
+	err := extractBinary(bytes.NewReader(tarball), &buf)
+	require.NoError(t, err)
+	assert.Equal(t, "the-binary", buf.String())
+}
+
+func TestExtractBinaryMissing(t *testing.T) {
+	tarball := createTarGz(t, "not-dottie", []byte("wrong"))
+
+	var buf bytes.Buffer
+	err := extractBinary(bytes.NewReader(tarball), &buf)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "dottie binary not found")
+}
+
+func TestAtomicReplace(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := filepath.Join(tmpDir, "new")
+	require.NoError(t, os.WriteFile(src, []byte("new-binary"), 0o644))
+
+	dest := filepath.Join(tmpDir, "dottie")
+	require.NoError(t, os.WriteFile(dest, []byte("old"), 0o755))
+
+	err := atomicReplace(src, dest)
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "new-binary", string(got))
+
+	info, err := os.Stat(dest)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+
+	// Source should no longer exist (it was renamed)
+	assert.False(t, fileExists(src))
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func TestDownloadAndInstall(t *testing.T) {
 	tarball := createTarGz(t, "dottie", []byte("fake-binary"))
 

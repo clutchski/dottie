@@ -62,23 +62,9 @@ func capitalizeOS(os string) string {
 	}
 }
 
-func downloadAndInstall(version string) error {
-	osName := capitalizeOS(util.DetectOS())
-	arch := util.DetectArch()
-	tarballName := fmt.Sprintf("dottie_%s_%s_%s.tar.gz", version, osName, arch)
-	url := fmt.Sprintf("%s/v%s/%s", downloadURL, version, tarballName)
-
-	resp, err := http.Get(url)
-	if err != nil {
-		return fmt.Errorf("downloading release: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("downloading release: status %d", resp.StatusCode)
-	}
-
-	gr, err := gzip.NewReader(resp.Body)
+// extractBinary reads a tar.gz stream and writes the "dottie" entry to w.
+func extractBinary(r io.Reader, w io.Writer) error {
+	gr, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("decompressing release: %w", err)
 	}
@@ -96,39 +82,72 @@ func downloadAndInstall(version string) error {
 		if filepath.Base(hdr.Name) != "dottie" {
 			continue
 		}
-
-		exePath, err := executablePath()
-		if err != nil {
-			return fmt.Errorf("locating executable: %w", err)
-		}
-
-		dir := filepath.Dir(exePath)
-		tmp, err := os.CreateTemp(dir, "dottie-update-*")
-		if err != nil {
-			return fmt.Errorf("creating temp file: %w", err)
-		}
-		tmpPath := tmp.Name()
-
-		if _, err := io.Copy(tmp, tr); err != nil {
-			tmp.Close()
-			os.Remove(tmpPath)
-			return fmt.Errorf("writing binary: %w", err)
-		}
-		tmp.Close()
-
-		if err := os.Chmod(tmpPath, 0o755); err != nil {
-			os.Remove(tmpPath)
-			return fmt.Errorf("setting permissions: %w", err)
-		}
-
-		if err := os.Rename(tmpPath, exePath); err != nil {
-			os.Remove(tmpPath)
-			return fmt.Errorf("replacing binary: %w", err)
-		}
-
-		fmt.Printf("Updated dottie to %s (%s/%s) -> %s\n", version, osName, arch, exePath)
-		return nil
+		_, err = io.Copy(w, tr)
+		return err
 	}
+}
+
+// atomicReplace sets srcPath executable and renames it over destPath.
+func atomicReplace(srcPath, destPath string) error {
+	if err := os.Chmod(srcPath, 0o755); err != nil {
+		os.Remove(srcPath)
+		return fmt.Errorf("setting permissions: %w", err)
+	}
+
+	if err := os.Rename(srcPath, destPath); err != nil {
+		os.Remove(srcPath)
+		return fmt.Errorf("replacing binary: %w", err)
+	}
+
+	return nil
+}
+
+// installBinary downloads a tarball from url and installs the dottie binary to targetPath.
+func installBinary(url, targetPath string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("downloading release: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("downloading release: status %d", resp.StatusCode)
+	}
+
+	dir := filepath.Dir(targetPath)
+	tmp, err := os.CreateTemp(dir, "dottie-update-*")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if err := extractBinary(resp.Body, tmp); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	tmp.Close()
+
+	return atomicReplace(tmpPath, targetPath)
+}
+
+func downloadAndInstall(version string) error {
+	osName := capitalizeOS(util.DetectOS())
+	arch := util.DetectArch()
+	tarballName := fmt.Sprintf("dottie_%s_%s_%s.tar.gz", version, osName, arch)
+	url := fmt.Sprintf("%s/v%s/%s", downloadURL, version, tarballName)
+
+	exePath, err := executablePath()
+	if err != nil {
+		return fmt.Errorf("locating executable: %w", err)
+	}
+
+	if err := installBinary(url, exePath); err != nil {
+		return err
+	}
+
+	fmt.Printf("Updated dottie to %s (%s/%s) -> %s\n", version, osName, arch, exePath)
+	return nil
 }
 
 // VersionStatus holds the result of an async version check.
