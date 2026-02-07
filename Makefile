@@ -32,9 +32,9 @@ install: build
 	mkdir -p ~/.local/bin
 	cp $(BINARY_NAME) ~/.local/bin/
 
-# Uninstall from $GOBIN
+# Uninstall from ~/.local/bin
 uninstall:
-	rm -f $(shell go env GOBIN 2>/dev/null || echo "$(shell go env GOPATH)/bin")/$(BINARY_NAME)
+	rm -f ~/.local/bin/$(BINARY_NAME)
 
 # Clean build artifacts
 clean:
