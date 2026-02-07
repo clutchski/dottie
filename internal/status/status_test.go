@@ -1,14 +1,22 @@
 package status
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/clutchski/dottie/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(s string) string {
+	return ansiPattern.ReplaceAllString(s, "")
+}
 
 func createTestConfig(t *testing.T, sourceDir, targetDir string) *config.Config {
 	t.Helper()
@@ -171,7 +179,6 @@ func TestFileStatus_String(t *testing.T) {
 	assert.Equal(t, "linked", FileStatusLinked.String())
 	assert.Equal(t, "unlinked", FileStatusMissing.String())
 	assert.Equal(t, "diff", FileStatusDiff.String())
-	assert.Equal(t, "untracked", FileStatusUntracked.String())
 }
 
 func TestGetStatus_RecursesIntoExistingDirectory(t *testing.T) {
@@ -249,161 +256,6 @@ func TestGetStatus_ShowsMultipleFilesInExistingDirectory(t *testing.T) {
 	assert.Equal(t, FileStatusMissing, statusMap["config/alacritty.toml"])
 }
 
-func TestGetStatusScan_FindsUntracked(t *testing.T) {
-	tmpDir := t.TempDir()
-	sourceDir := filepath.Join(tmpDir, "dotfiles")
-	targetDir := filepath.Join(tmpDir, "home")
-
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
-
-	// Create .bashrc in home (untracked - not in repo)
-	bashrc := filepath.Join(targetDir, ".bashrc")
-	require.NoError(t, os.WriteFile(bashrc, []byte("# my bashrc"), 0644))
-
-	cfg := createTestConfig(t, sourceDir, targetDir)
-	checker := New(cfg)
-
-	statuses, err := checker.GetStatusScan()
-	require.NoError(t, err)
-
-	// Find the bashrc status
-	var found *DotfileStatus
-	for i := range statuses {
-		if statuses[i].TargetPath == bashrc {
-			found = &statuses[i]
-			break
-		}
-	}
-
-	require.NotNil(t, found, "expected to find .bashrc in statuses")
-	assert.Equal(t, FileStatusUntracked, found.Status)
-}
-
-func TestGetStatusScan_ShowsOk(t *testing.T) {
-	tmpDir := t.TempDir()
-	sourceDir := filepath.Join(tmpDir, "dotfiles")
-	targetDir := filepath.Join(tmpDir, "home")
-
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
-
-	// Create source file
-	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
-
-	// Create symlink
-	targetVimrc := filepath.Join(targetDir, ".vimrc")
-	require.NoError(t, os.Symlink(vimrc, targetVimrc))
-
-	cfg := createTestConfig(t, sourceDir, targetDir)
-	checker := New(cfg)
-
-	statuses, err := checker.GetStatusScan()
-	require.NoError(t, err)
-
-	// Find the vimrc status
-	var found *DotfileStatus
-	for i := range statuses {
-		if statuses[i].TargetPath == targetVimrc {
-			found = &statuses[i]
-			break
-		}
-	}
-
-	require.NotNil(t, found, "expected to find .vimrc in statuses")
-	assert.Equal(t, FileStatusLinked, found.Status)
-}
-
-func TestGetStatusScan_ShowsMissing(t *testing.T) {
-	tmpDir := t.TempDir()
-	sourceDir := filepath.Join(tmpDir, "dotfiles")
-	targetDir := filepath.Join(tmpDir, "home")
-
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
-
-	// Create source file but no symlink in home
-	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
-
-	cfg := createTestConfig(t, sourceDir, targetDir)
-	checker := New(cfg)
-
-	statuses, err := checker.GetStatusScan()
-	require.NoError(t, err)
-
-	// Find the vimrc status (should be missing)
-	targetVimrc := filepath.Join(targetDir, ".vimrc")
-	var found *DotfileStatus
-	for i := range statuses {
-		if statuses[i].TargetPath == targetVimrc {
-			found = &statuses[i]
-			break
-		}
-	}
-
-	require.NotNil(t, found, "expected to find .vimrc in statuses")
-	assert.Equal(t, FileStatusMissing, found.Status)
-}
-
-func TestGetStatusScan_ScansConfigDir(t *testing.T) {
-	tmpDir := t.TempDir()
-	sourceDir := filepath.Join(tmpDir, "dotfiles")
-	targetDir := filepath.Join(tmpDir, "home")
-
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
-
-	// Create .config/foo.toml in home (untracked file)
-	configDir := filepath.Join(targetDir, ".config")
-	require.NoError(t, os.MkdirAll(configDir, 0755))
-
-	fooFile := filepath.Join(configDir, "foo.toml")
-	require.NoError(t, os.WriteFile(fooFile, []byte("# foo"), 0644))
-
-	cfg := createTestConfig(t, sourceDir, targetDir)
-	checker := New(cfg)
-
-	statuses, err := checker.GetStatusScan()
-	require.NoError(t, err)
-
-	// Find the foo.toml status
-	var found *DotfileStatus
-	for i := range statuses {
-		if statuses[i].TargetPath == fooFile {
-			found = &statuses[i]
-			break
-		}
-	}
-
-	require.NotNil(t, found, "expected to find .config/foo.toml in statuses")
-	assert.Equal(t, FileStatusUntracked, found.Status)
-}
-
-func TestGetStatusScan_IgnoresNonMatching(t *testing.T) {
-	tmpDir := t.TempDir()
-	sourceDir := filepath.Join(tmpDir, "dotfiles")
-	targetDir := filepath.Join(tmpDir, "home")
-
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
-
-	// Create random dotfile that doesn't match any pattern
-	randomFile := filepath.Join(targetDir, ".some_random_file")
-	require.NoError(t, os.WriteFile(randomFile, []byte("random"), 0644))
-
-	cfg := createTestConfig(t, sourceDir, targetDir)
-	checker := New(cfg)
-
-	statuses, err := checker.GetStatusScan()
-	require.NoError(t, err)
-
-	// Should not find the random file
-	for _, s := range statuses {
-		assert.NotEqual(t, randomFile, s.TargetPath, "random file should not be in statuses")
-	}
-}
 
 func TestGetStatus_RecursiveDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -484,82 +336,6 @@ func TestGetStatus_RecursiveDirectoriesMixed(t *testing.T) {
 	assert.Equal(t, FileStatusMissing, statusMap["config/nvim/lua/plugins/init.lua"])
 }
 
-func TestGetStatusScan_ShowsOkForLinkedConfigFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	sourceDir := filepath.Join(tmpDir, "dotfiles")
-	targetDir := filepath.Join(tmpDir, "home")
-
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
-
-	// Create source config/starship.toml
-	sourceConfig := filepath.Join(sourceDir, "config")
-	require.NoError(t, os.MkdirAll(sourceConfig, 0755))
-	starshipSrc := filepath.Join(sourceConfig, "starship.toml")
-	require.NoError(t, os.WriteFile(starshipSrc, []byte("format = \"test\""), 0644))
-
-	// Create .config directory and symlink starship.toml
-	targetConfig := filepath.Join(targetDir, ".config")
-	require.NoError(t, os.MkdirAll(targetConfig, 0755))
-	starshipTarget := filepath.Join(targetConfig, "starship.toml")
-	require.NoError(t, os.Symlink(starshipSrc, starshipTarget))
-
-	cfg := createTestConfig(t, sourceDir, targetDir)
-	checker := New(cfg)
-
-	statuses, err := checker.GetStatusScan()
-	require.NoError(t, err)
-
-	// Find the starship.toml status
-	var found *DotfileStatus
-	for i := range statuses {
-		if statuses[i].TargetPath == starshipTarget {
-			found = &statuses[i]
-			break
-		}
-	}
-
-	require.NotNil(t, found, "expected to find .config/starship.toml in statuses")
-	assert.Equal(t, FileStatusLinked, found.Status, "linked config file should show as ok, not untracked")
-}
-
-func TestGetStatusScan_RespectsCustomTargetDir(t *testing.T) {
-	tmpDir := t.TempDir()
-	sourceDir := filepath.Join(tmpDir, "dotfiles")
-	targetDir := filepath.Join(tmpDir, "custom-target")
-
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
-
-	// Create source file
-	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
-
-	cfg := createTestConfig(t, sourceDir, targetDir)
-	checker := New(cfg)
-
-	statuses, err := checker.GetStatusScan()
-	require.NoError(t, err)
-
-	// Find the vimrc status
-	targetVimrc := filepath.Join(targetDir, ".vimrc")
-	var found *DotfileStatus
-	for i := range statuses {
-		if statuses[i].TargetPath == targetVimrc {
-			found = &statuses[i]
-			break
-		}
-	}
-
-	require.NotNil(t, found, "expected to find .vimrc in statuses")
-	assert.Equal(t, FileStatusMissing, found.Status)
-	// Target path should NOT start with ~ since target_dir is not HOME
-	assert.Equal(t, targetVimrc, found.TargetPath)
-	// formatTargetPath should return full path, not ~/
-	displayPath := checker.formatTargetPath(found.TargetPath)
-	assert.NotContains(t, displayPath, "~", "should not use ~ for custom target_dir")
-	assert.Equal(t, targetVimrc, displayPath)
-}
 
 // Comprehensive status scenarios
 
@@ -764,7 +540,7 @@ func TestStatus_ParentSymlinkedShowsFiles(t *testing.T) {
 	assert.Equal(t, FileStatusLinked, statusMap["config/alacritty.toml"])
 }
 
-func TestStatusScan_UntrackedInConfigDir(t *testing.T) {
+func TestPrintSummary_AllOk(t *testing.T) {
 	tmpDir := t.TempDir()
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
@@ -772,33 +548,28 @@ func TestStatusScan_UntrackedInConfigDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sourceDir, 0755))
 	require.NoError(t, os.MkdirAll(targetDir, 0755))
 
-	// Create empty source (no dotfiles in repo)
+	// Create linked files
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.Symlink(vimrc, filepath.Join(targetDir, ".vimrc")))
 
-	// Create .config with some files in target (untracked)
-	configTarget := filepath.Join(targetDir, ".config")
-	require.NoError(t, os.MkdirAll(configTarget, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(configTarget, "random.toml"), []byte("random"), 0644))
+	bashrc := filepath.Join(sourceDir, "bashrc")
+	require.NoError(t, os.WriteFile(bashrc, []byte("# bash"), 0644))
+	require.NoError(t, os.Symlink(bashrc, filepath.Join(targetDir, ".bashrc")))
 
 	cfg := createTestConfig(t, sourceDir, targetDir)
 	checker := New(cfg)
 
-	statuses, err := checker.GetStatusScan()
+	var buf bytes.Buffer
+	allOk, err := checker.PrintSummary(&buf)
 	require.NoError(t, err)
+	assert.True(t, allOk)
 
-	// Should find the untracked file
-	var found *DotfileStatus
-	for i := range statuses {
-		if filepath.Base(statuses[i].TargetPath) == "random.toml" {
-			found = &statuses[i]
-			break
-		}
-	}
-
-	require.NotNil(t, found, "expected to find untracked file")
-	assert.Equal(t, FileStatusUntracked, found.Status)
+	output := stripANSI(buf.String())
+	assert.Equal(t, "dotfiles:\n  \u2713 2 ok\n", output)
 }
 
-func TestStatusScan_ShowsFilesWhenParentSymlinked(t *testing.T) {
+func TestPrintSummary_WithProblems(t *testing.T) {
 	tmpDir := t.TempDir()
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
@@ -806,28 +577,77 @@ func TestStatusScan_ShowsFilesWhenParentSymlinked(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sourceDir, 0755))
 	require.NoError(t, os.MkdirAll(targetDir, 0755))
 
-	// Create config in source
-	configSrc := filepath.Join(sourceDir, "config")
-	require.NoError(t, os.MkdirAll(configSrc, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(configSrc, "app.toml"), []byte("app"), 0644))
+	// One linked, one missing
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.Symlink(vimrc, filepath.Join(targetDir, ".vimrc")))
 
-	// Symlink entire .config directory
-	require.NoError(t, os.Symlink(configSrc, filepath.Join(targetDir, ".config")))
+	bashrc := filepath.Join(sourceDir, "bashrc")
+	require.NoError(t, os.WriteFile(bashrc, []byte("# bash"), 0644))
+	// no symlink for bashrc -> missing
 
 	cfg := createTestConfig(t, sourceDir, targetDir)
 	checker := New(cfg)
 
-	statuses, err := checker.GetStatusScan()
+	var buf bytes.Buffer
+	allOk, err := checker.PrintSummary(&buf)
 	require.NoError(t, err)
+	assert.False(t, allOk)
 
-	// Should show files as linked
-	var found *DotfileStatus
-	for i := range statuses {
-		if statuses[i].Name == "config/app.toml" {
-			found = &statuses[i]
-			break
-		}
-	}
-	require.NotNil(t, found, "expected to find config/app.toml")
-	assert.Equal(t, FileStatusLinked, found.Status)
+	output := stripANSI(buf.String())
+	assert.Contains(t, output, "dotfiles:\n")
+	assert.Contains(t, output, "  \u2713 1 ok\n")
+	assert.Contains(t, output, "  x bashrc\n")
+	// Should NOT list the ok file
+	assert.NotContains(t, output, "vimrc")
 }
+
+func TestPrintSummary_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	cfg := createTestConfig(t, sourceDir, targetDir)
+	checker := New(cfg)
+
+	var buf bytes.Buffer
+	allOk, err := checker.PrintSummary(&buf)
+	require.NoError(t, err)
+	assert.True(t, allOk)
+
+	output := buf.String()
+	assert.Equal(t, "", output)
+}
+
+func TestPrintSummary_AllBad(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	// Create source files with no symlinks
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "bashrc"), []byte("# bash"), 0644))
+
+	cfg := createTestConfig(t, sourceDir, targetDir)
+	checker := New(cfg)
+
+	var buf bytes.Buffer
+	allOk, err := checker.PrintSummary(&buf)
+	require.NoError(t, err)
+	assert.False(t, allOk)
+
+	output := stripANSI(buf.String())
+	assert.Contains(t, output, "dotfiles:\n")
+	// No ok line when 0 are ok
+	assert.NotContains(t, output, "\u2713")
+	// Failure line lists names
+	assert.Contains(t, output, "  x bashrc\n")
+	assert.Contains(t, output, "  x vimrc\n")
+}
+
