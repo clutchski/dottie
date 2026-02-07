@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
-
 	"github.com/clutchski/dottie/internal/console"
 )
 
@@ -269,22 +267,10 @@ func boolToString(b bool) string {
 	return "false"
 }
 
-// DisplayName strips the file extension and any leading numeric prefix
-// (e.g. "01-homebrew.sh" -> "homebrew").
+// DisplayName strips the file extension (e.g. "01-homebrew.sh" -> "01-homebrew").
 func DisplayName(name string) string {
-	name = strings.TrimSuffix(name, filepath.Ext(name))
-	if i := strings.IndexByte(name, '-'); i >= 0 {
-		prefix := name[:i]
-		allDigits := len(prefix) > 0
-		for _, c := range prefix {
-			if !unicode.IsDigit(c) {
-				allDigits = false
-				break
-			}
-		}
-		if allDigits {
-			name = name[i+1:]
-		}
+	if ext := filepath.Ext(name); ext != name {
+		return strings.TrimSuffix(name, ext)
 	}
 	return name
 }

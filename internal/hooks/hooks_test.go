@@ -271,6 +271,83 @@ func TestStartStatusCheck_MissingDirectory(t *testing.T) {
 	assert.Empty(t, result.Hooks)
 }
 
+func TestDisplayName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"homebrew.sh", "homebrew"},
+		{"01-homebrew.sh", "01-homebrew"},
+		{"setup", "setup"},
+		{"my-script.bash", "my-script"},
+		{"", ""},
+		{".hidden", ".hidden"},
+		{"no-ext", "no-ext"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.want, DisplayName(tt.input))
+		})
+	}
+}
+
+func TestRunAll_ReturnsPerHookStatuses(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-ok.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-fail.sh"), []byte("#!/bin/bash\nexit 1"), 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+	statuses, err := runner.RunAll("pre-link", false, false, silent)
+	require.NoError(t, err)
+
+	require.Len(t, statuses, 2)
+	assert.Equal(t, "01-ok.sh", statuses[0].Name)
+	assert.True(t, statuses[0].Ok)
+	assert.Equal(t, "02-fail.sh", statuses[1].Name)
+	assert.False(t, statuses[1].Ok)
+}
+
+func TestRunAll_EmptyDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+	statuses, err := runner.RunAll("pre-link", false, false, silent)
+	require.NoError(t, err)
+	assert.Nil(t, statuses)
+}
+
+func TestRunAll_MissingDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	runner := New(filepath.Join(tmpDir, "nonexistent"), tmpDir, "/home/test")
+	statuses, err := runner.RunAll("pre-link", false, false, silent)
+	require.NoError(t, err)
+	assert.Nil(t, statuses)
+}
+
+func TestRunAll_AllOk(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "a.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "b.sh"), []byte("#!/bin/bash\nexit 0"), 0755))
+
+	runner := New(hooksDir, tmpDir, "/home/test")
+	statuses, err := runner.RunAll("pre-link", false, false, silent)
+	require.NoError(t, err)
+
+	require.Len(t, statuses, 2)
+	for _, s := range statuses {
+		assert.True(t, s.Ok)
+	}
+}
+
 func TestRun_CapturesOutput(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
