@@ -11,15 +11,16 @@ import (
 	"github.com/clutchski/dottie/internal/util"
 )
 
-// Status represents the result of a link operation.
+// Status represents the result of a link operation or check.
 type Status int
 
 const (
 	StatusLinked Status = iota
 	StatusWouldLink
 	StatusAlreadyLinked
-	StatusSkipped
 	StatusError
+	StatusMissing // target doesn't exist
+	StatusDiff    // target exists but points elsewhere
 )
 
 func (s Status) String() string {
@@ -30,21 +31,25 @@ func (s Status) String() string {
 		return "would link"
 	case StatusAlreadyLinked:
 		return "already linked"
-	case StatusSkipped:
-		return "skipped"
 	case StatusError:
 		return "error"
+	case StatusMissing:
+		return "missing"
+	case StatusDiff:
+		return "diff"
 	default:
 		return "unknown"
 	}
 }
 
-// Result represents the outcome of linking a single file.
+// Result represents the outcome of linking or checking a single file.
 type Result struct {
 	Source     string
 	Target     string
+	Name       string // display name (relative path from source dir)
 	Status     Status
 	BackupPath string
+	Message    string // human-readable reason (for failures/diffs)
 	Error      error
 }
 
@@ -75,6 +80,68 @@ func (l *linker) Link(dryRun, force bool) ([]Result, error) {
 	}
 
 	return l.createLinks(sources, dryRun, force), nil
+}
+
+// Check performs a read-only status check of all dotfiles.
+func (l *linker) Check() ([]Result, error) {
+	sources, err := l.collectSourcePaths()
+	if err != nil {
+		return nil, err
+	}
+
+	sourceDir := l.cfg.GetSourcePath()
+	var results []Result
+	for _, source := range sources {
+		relPath, _ := filepath.Rel(sourceDir, source)
+		target := l.computeTargetPath(relPath)
+		r := l.checkFile(source, target)
+		r.Name = relPath
+		r.Source = source
+		r.Target = target
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+func (l *linker) checkFile(source, target string) Result {
+	var r Result
+
+	// Check if target exists
+	if !util.FileExists(target) {
+		r.Status = StatusMissing
+		r.Message = "not linked"
+		return r
+	}
+
+	// Check if target resolves to source (handles both direct symlinks
+	// and files accessed through symlinked parent directories)
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		r.Status = StatusDiff
+		r.Message = "cannot resolve target path"
+		return r
+	}
+
+	resolvedSource, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		resolvedSource = source
+	}
+
+	if resolvedTarget == resolvedSource {
+		r.Status = StatusLinked
+		return r
+	}
+
+	// Not linked - check if it's a symlink pointing elsewhere or a regular file
+	if util.IsSymlink(target) {
+		linkTarget, _ := util.SymlinkTarget(target)
+		r.Status = StatusDiff
+		r.Message = fmt.Sprintf("symlink points to %s", linkTarget)
+	} else {
+		r.Status = StatusDiff
+		r.Message = "exists but not linked to repo"
+	}
+	return r
 }
 
 // collectSourcePaths walks the source directory and collects all file paths.
@@ -165,7 +232,9 @@ func (l *linker) createLinks(sources []string, dryRun, force bool) []Result {
 	for _, source := range sources {
 		relPath, _ := filepath.Rel(sourceDir, source)
 		target := l.computeTargetPath(relPath)
-		results = append(results, l.linkFile(source, target, dryRun, force))
+		r := l.linkFile(source, target, dryRun, force)
+		r.Name = relPath
+		results = append(results, r)
 	}
 	return results
 }

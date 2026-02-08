@@ -576,3 +576,287 @@ func TestComputeTargetPath(t *testing.T) {
 		})
 	}
 }
+
+// --- Check tests ---
+
+func createCheckConfig(t *testing.T, sourceDir, targetDir string) *config.Config {
+	t.Helper()
+
+	configContent := `
+source_dir: .
+add_dot: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0644))
+
+	cfg, err := config.Load(sourceDir)
+	require.NoError(t, err)
+	cfg.TargetDir = targetDir
+	return cfg
+}
+
+func TestCheck_Linked(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.Symlink(vimrc, filepath.Join(targetDir, ".vimrc")))
+
+	cfg := createCheckConfig(t, sourceDir, targetDir)
+	linker := New(cfg)
+
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusLinked, results[0].Status)
+	assert.Equal(t, "vimrc", results[0].Name)
+}
+
+func TestCheck_Missing(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0644))
+
+	cfg := createCheckConfig(t, sourceDir, targetDir)
+	linker := New(cfg)
+
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusMissing, results[0].Status)
+	assert.Equal(t, "not linked", results[0].Message)
+}
+
+func TestCheck_Diff_RegularFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(targetDir, ".vimrc"), []byte("different"), 0644))
+
+	cfg := createCheckConfig(t, sourceDir, targetDir)
+	linker := New(cfg)
+
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusDiff, results[0].Status)
+	assert.Contains(t, results[0].Message, "not linked")
+}
+
+func TestCheck_Diff_WrongSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0644))
+
+	otherFile := filepath.Join(tmpDir, "other")
+	require.NoError(t, os.WriteFile(otherFile, []byte("other"), 0644))
+	require.NoError(t, os.Symlink(otherFile, filepath.Join(targetDir, ".vimrc")))
+
+	cfg := createCheckConfig(t, sourceDir, targetDir)
+	linker := New(cfg)
+
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusDiff, results[0].Status)
+	assert.Contains(t, results[0].Message, "symlink points to")
+}
+
+func TestCheck_IgnoresConfiguredFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "README.md"), []byte("readme"), 0644))
+
+	configContent := `
+source_dir: .
+add_dot: true
+ignore:
+  - README.md
+`
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0644))
+
+	cfg, err := config.Load(sourceDir)
+	require.NoError(t, err)
+	cfg.TargetDir = targetDir
+
+	linker := New(cfg)
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	assert.Len(t, results, 1)
+	assert.Equal(t, "vimrc", results[0].Name)
+}
+
+func TestCheck_RecursesIntoDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	sourceConfig := filepath.Join(sourceDir, "config")
+	require.NoError(t, os.MkdirAll(sourceConfig, 0755))
+	starshipSrc := filepath.Join(sourceConfig, "starship.toml")
+	require.NoError(t, os.WriteFile(starshipSrc, []byte("format"), 0644))
+
+	existingConfig := filepath.Join(targetDir, ".config")
+	require.NoError(t, os.MkdirAll(existingConfig, 0755))
+	require.NoError(t, os.Symlink(starshipSrc, filepath.Join(existingConfig, "starship.toml")))
+
+	cfg := createCheckConfig(t, sourceDir, targetDir)
+	linker := New(cfg)
+
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, filepath.Join("config", "starship.toml"), results[0].Name)
+	assert.Equal(t, StatusLinked, results[0].Status)
+}
+
+func TestCheck_MixedStatesInDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	configSrc := filepath.Join(sourceDir, "config")
+	require.NoError(t, os.MkdirAll(configSrc, 0755))
+
+	starshipSrc := filepath.Join(configSrc, "starship.toml")
+	require.NoError(t, os.WriteFile(starshipSrc, []byte("starship"), 0644))
+
+	alacrittySrc := filepath.Join(configSrc, "alacritty.toml")
+	require.NoError(t, os.WriteFile(alacrittySrc, []byte("alacritty"), 0644))
+
+	configTarget := filepath.Join(targetDir, ".config")
+	require.NoError(t, os.MkdirAll(configTarget, 0755))
+	require.NoError(t, os.Symlink(starshipSrc, filepath.Join(configTarget, "starship.toml")))
+	// alacritty not linked
+
+	cfg := createCheckConfig(t, sourceDir, targetDir)
+	linker := New(cfg)
+
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	require.Len(t, results, 2)
+
+	statusMap := make(map[string]Status)
+	for _, r := range results {
+		statusMap[r.Name] = r.Status
+	}
+
+	assert.Equal(t, StatusLinked, statusMap[filepath.Join("config", "starship.toml")])
+	assert.Equal(t, StatusMissing, statusMap[filepath.Join("config", "alacritty.toml")])
+}
+
+func TestCheck_ParentSymlinkedShowsFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	configSrc := filepath.Join(sourceDir, "config")
+	require.NoError(t, os.MkdirAll(configSrc, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(configSrc, "starship.toml"), []byte("starship"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(configSrc, "alacritty.toml"), []byte("alacritty"), 0644))
+
+	// Symlink entire .config to source config
+	require.NoError(t, os.Symlink(configSrc, filepath.Join(targetDir, ".config")))
+
+	cfg := createCheckConfig(t, sourceDir, targetDir)
+	linker := New(cfg)
+
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	require.Len(t, results, 2)
+
+	statusMap := make(map[string]Status)
+	for _, r := range results {
+		statusMap[r.Name] = r.Status
+	}
+
+	assert.Equal(t, StatusLinked, statusMap[filepath.Join("config", "starship.toml")])
+	assert.Equal(t, StatusLinked, statusMap[filepath.Join("config", "alacritty.toml")])
+}
+
+func TestCheck_SetsNameAndTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+
+	cfg := createCheckConfig(t, sourceDir, targetDir)
+	linker := New(cfg)
+
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, "vimrc", results[0].Name)
+	assert.Equal(t, vimrc, results[0].Source)
+	assert.Equal(t, filepath.Join(targetDir, ".vimrc"), results[0].Target)
+}
+
+func TestLink_SetsName(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0755))
+
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	results, err := linker.Link(false, false)
+	require.NoError(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, "vimrc", results[0].Name)
+}

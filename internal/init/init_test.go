@@ -13,7 +13,7 @@ func TestInit_CreatesStructure(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")
 
-	err := Init(targetDir, false)
+	err := Init(targetDir)
 	require.NoError(t, err)
 
 	// Check dottie.yaml exists (not .dottie.yaml)
@@ -33,7 +33,7 @@ func TestInit_CreatesValidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")
 
-	err := Init(targetDir, false)
+	err := Init(targetDir)
 	require.NoError(t, err)
 
 	configPath := filepath.Join(targetDir, "dottie.yaml")
@@ -50,7 +50,7 @@ func TestInit_CreatesExampleHooks(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")
 
-	err := Init(targetDir, false)
+	err := Init(targetDir)
 	require.NoError(t, err)
 
 	// Check example hooks exist
@@ -86,7 +86,7 @@ func TestInit_CreatesExampleFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")
 
-	err := Init(targetDir, false)
+	err := Init(targetDir)
 	require.NoError(t, err)
 
 	// Check example dotfiles in home/
@@ -104,7 +104,7 @@ func TestInit_CreatesConfigDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")
 
-	err := Init(targetDir, false)
+	err := Init(targetDir)
 	require.NoError(t, err)
 
 	// Check config directory exists with example file
@@ -121,7 +121,7 @@ func TestInit_CreatesBootstrapScript(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")
 
-	err := Init(targetDir, false)
+	err := Init(targetDir)
 	require.NoError(t, err)
 
 	// Check scripts directory and bootstrap.sh exist
@@ -142,17 +142,6 @@ func TestInit_CreatesBootstrapScript(t *testing.T) {
 	assert.True(t, info.Mode()&0111 != 0, "bootstrap.sh should be executable")
 }
 
-func TestInit_DryRun(t *testing.T) {
-	tmpDir := t.TempDir()
-	targetDir := filepath.Join(tmpDir, "dotfiles")
-
-	err := Init(targetDir, true)
-	require.NoError(t, err)
-
-	_, err = os.Stat(targetDir)
-	assert.True(t, os.IsNotExist(err), "dry-run should not create directory")
-}
-
 func TestInit_FailsIfExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")
@@ -163,7 +152,7 @@ func TestInit_FailsIfExists(t *testing.T) {
 	configPath := filepath.Join(targetDir, "dottie.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(""), 0644))
 
-	err := Init(targetDir, false)
+	err := Init(targetDir)
 	assert.Error(t, err, "should fail if dottie.yaml already exists")
 }
 
@@ -178,7 +167,7 @@ func TestInit_WorksWithCurrentDir(t *testing.T) {
 
 	require.NoError(t, os.Chdir(tmpDir))
 
-	err = Init(".", false)
+	err = Init(".")
 	require.NoError(t, err)
 
 	assert.FileExists(t, filepath.Join(tmpDir, "dottie.yaml"))

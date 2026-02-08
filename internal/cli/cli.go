@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +13,6 @@ import (
 	"github.com/clutchski/dottie/internal/hooks"
 	dotinit "github.com/clutchski/dottie/internal/init"
 	"github.com/clutchski/dottie/internal/link"
-	"github.com/clutchski/dottie/internal/status"
 	"github.com/clutchski/dottie/internal/update"
 )
 
@@ -23,14 +20,6 @@ var (
 	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
-)
-
-// ANSI color codes
-const (
-	colorReset  = "\033[0m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorRed    = "\033[31m"
 )
 
 // SetVersion sets version info (called from main).
@@ -49,15 +38,15 @@ func Run(args []string) int {
 
 	switch args[0] {
 	case "init":
-		return runInit(args[1:])
+		return cmdInit(args[1:])
 	case "run":
-		return runRun(args[1:])
+		return cmdRun(args[1:])
 	case "hooks":
-		return runHooks(args[1:])
+		return cmdHooks(args[1:])
 	case "status":
-		return runStatus(args[1:])
+		return cmdStatus(args[1:])
 	case "update":
-		return runUpdate()
+		return cmdUpdate()
 	case "version", "--version", "-v":
 		printVersion()
 		return 0
@@ -93,189 +82,68 @@ func printVersion() {
 	fmt.Printf("  built:  %s\n", date)
 }
 
-func runInit(args []string) int {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	dryRun := fs.Bool("n", false, "dry-run")
-	_ = fs.Parse(args)
-
+func cmdInit(args []string) int {
 	dir := "."
-	if fs.NArg() > 0 {
-		dir = fs.Arg(0)
+	if len(args) > 0 {
+		dir = args[0]
 	}
 
-	if err := dotinit.Init(dir, *dryRun); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+	if err := dotinit.Init(dir); err != nil {
+		return fatal(err)
 	}
 
-	if !*dryRun {
-		absDir, _ := filepath.Abs(dir)
-		fmt.Printf("Initialized dotfiles repository at %s\n", absDir)
-	}
+	absDir, _ := filepath.Abs(dir)
+	fmt.Printf("Initialized dotfiles repository at %s\n", absDir)
 
 	return 0
 }
 
-func runRun(args []string) int {
+func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
 	force := fs.Bool("f", false, "force")
 	verbose := fs.Bool("v", false, "verbose")
-	quiet := fs.Bool("q", false, "quiet")
 	_ = fs.Parse(args)
 
-	con := console.New(*quiet)
+	p := console.New(*verbose)
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
-	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
-
-	// Track per-hook results across phases (ok only if all phases pass)
-	hookOk := make(map[string]bool)
-
+	hookRunner := newHookRunner(cfg)
 	// Run pre-link hooks
-	preHooks, err := runHookPhase(hookRunner, "pre-link", *dryRun, *verbose, con)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error running pre-link hooks: %v\n", err)
-		return 1
-	}
-	for _, h := range preHooks {
-		hookOk[h.Name] = h.Ok
-	}
+	preOk, preTotal := runHooksPhase(hookRunner, p, "pre-link", *dryRun)
 
 	// Link dotfiles
 	linker := link.New(cfg)
 	results, err := linker.Link(*dryRun, *force)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
-	// Print results based on verbosity
-	if *verbose {
-		fmt.Fprintln(con.Stdout, "dotfiles:")
-	}
+	linksOk := 0
+	p.Header("links")
 	for _, r := range results {
-		if r.BackupPath != "" {
-			fmt.Fprintf(con.Stdout, "backed up %s -> %s\n", r.Target, r.BackupPath)
-		}
-
-		if *verbose {
-			var symbol, color string
-			switch r.Status {
-			case link.StatusLinked:
-				symbol = "+"
-				color = colorGreen
-			case link.StatusWouldLink:
-				symbol = "~"
-				color = colorGreen
-			case link.StatusAlreadyLinked:
-				symbol = "✓"
-				color = colorGreen
-			case link.StatusSkipped:
-				symbol = "-"
-				color = colorRed
-			case link.StatusError:
-				symbol = "x"
-				color = colorRed
-			}
-			fmt.Fprintf(con.Stdout, "  %s%s%s %s -> %s\n", color, symbol, colorReset, filepath.Base(r.Source), r.Target)
-			if r.Error != nil {
-				fmt.Fprintf(con.Stderr, "    %v\n", r.Error)
-			}
+		p.PrintLink(r)
+		if r.Status != link.StatusError {
+			linksOk++
 		}
 	}
 
 	// Run post-link hooks
-	postHooks, err := runHookPhase(hookRunner, "post-link", *dryRun, *verbose, con)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error running post-link hooks: %v\n", err)
+	postOk, postTotal := runHooksPhase(hookRunner, p, "post-link", *dryRun)
+
+	p.Summary(preOk, preTotal, linksOk, len(results), postOk, postTotal)
+
+	if linksOk < len(results) || preOk < preTotal || postOk < postTotal {
 		return 1
 	}
-	for _, h := range postHooks {
-		if !h.Ok {
-			hookOk[h.Name] = false
-		}
-	}
-
-	// Default mode: print summary
-	if !*verbose && !*quiet {
-		printRunSummary(con.Stdout, results)
-		// Build deduplicated hook statuses preserving order from preHooks
-		var dedupedHooks []hooks.HookStatus
-		for _, h := range preHooks {
-			dedupedHooks = append(dedupedHooks, hooks.HookStatus{Name: h.Name, Ok: hookOk[h.Name]})
-		}
-		printHooksSummary(con.Stdout, dedupedHooks)
-	}
-
 	return 0
 }
 
-// runHookPhase runs hooks for a phase. In verbose mode, output streams through.
-// In default mode, output is captured and only shown if the hook fails.
-// Returns per-hook statuses.
-func runHookPhase(runner *hooks.Runner, phase string, dryRun, verbose bool, con *console.Console) ([]hooks.HookStatus, error) {
-	if verbose {
-		err := runner.Run(phase, dryRun, verbose, con)
-		return nil, err
-	}
-	// Default/quiet: capture output, show on failure
-	var bufOut, bufErr bytes.Buffer
-	bufCon := &console.Console{Stdout: &bufOut, Stderr: &bufErr}
-	statuses, err := runner.RunAll(phase, dryRun, false, bufCon)
-	if err != nil {
-		return nil, err
-	}
-	// Show captured output for any failed hooks
-	for _, s := range statuses {
-		if !s.Ok {
-			_, _ = con.Stdout.Write(bufOut.Bytes())
-			_, _ = con.Stderr.Write(bufErr.Bytes())
-			break
-		}
-	}
-	return statuses, nil
-}
-
-// printRunSummary prints the dotfiles summary line for a run.
-func printRunSummary(w io.Writer, results []link.Result) {
-	added := 0
-	linked := 0
-	var errorNames []string
-	for _, r := range results {
-		switch r.Status {
-		case link.StatusLinked:
-			added++
-		case link.StatusAlreadyLinked:
-			linked++
-		case link.StatusError:
-			errorNames = append(errorNames, filepath.Base(r.Source))
-		}
-	}
-
-	fmt.Fprintln(w, "dotfiles:")
-	if added > 0 || linked > 0 {
-		var parts []string
-		if added > 0 {
-			parts = append(parts, fmt.Sprintf("added:%d", added))
-		}
-		if linked > 0 {
-			parts = append(parts, fmt.Sprintf("linked:%d", linked))
-		}
-		fmt.Fprintf(w, "  %s✓%s %s\n", colorGreen, colorReset, strings.Join(parts, " "))
-	}
-	if len(errorNames) > 0 {
-		fmt.Fprintf(w, "  %sx%s %s\n", colorRed, colorReset, strings.Join(errorNames, ", "))
-	}
-}
-
-func runHooks(args []string) int {
+func cmdHooks(args []string) int {
 	if len(args) < 1 {
 		printHooksUsage()
 		return 1
@@ -283,9 +151,9 @@ func runHooks(args []string) int {
 
 	switch args[0] {
 	case "list":
-		return runHooksList(args[1:])
+		return cmdHooksList(args[1:])
 	case "run":
-		return runHooksRun(args[1:])
+		return cmdHooksRun(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown hooks subcommand: %s\n", args[0])
 		printHooksUsage()
@@ -306,20 +174,17 @@ Examples:
   dottie hooks run status`)
 }
 
-func runHooksList(args []string) int {
+func cmdHooksList(args []string) int {
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
-	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hookRunner := newHookRunner(cfg)
 
 	hooksList, err := hookRunner.List()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
 	if len(hooksList) == 0 {
@@ -327,7 +192,7 @@ func runHooksList(args []string) int {
 		return 0
 	}
 
-	fmt.Println("Active hooks:")
+	fmt.Println("hooks:")
 	for _, h := range hooksList {
 		fmt.Printf("  %s\n", filepath.Base(h))
 	}
@@ -335,10 +200,9 @@ func runHooksList(args []string) int {
 	return 0
 }
 
-func runHooksRun(args []string) int {
+func cmdHooksRun(args []string) int {
 	fs := flag.NewFlagSet("hooks run", flag.ExitOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
-	verbose := fs.Bool("v", false, "verbose")
 	_ = fs.Parse(args)
 
 	if fs.NArg() < 1 {
@@ -354,82 +218,85 @@ func runHooksRun(args []string) int {
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
-	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
+	hookRunner := newHookRunner(cfg)
+	p := console.New(true)
 
-	if err := hookRunner.Run(phase, *dryRun, *verbose, console.New(false)); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running %s hooks: %v\n", phase, err)
+	ok, total := runHooksPhase(hookRunner, p, phase, *dryRun)
+	if ok < total {
 		return 1
 	}
-
 	return 0
 }
 
-func runStatus(args []string) int {
+func cmdStatus(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
-	verbose := fs.Bool("v", false, "verbose")
-	quiet := fs.Bool("q", false, "quiet")
 	_ = fs.Parse(args)
 
-	con := console.New(*quiet)
+	p := console.New(true)
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(con.Stdout, "dottie %s\n", version)
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
+
+	// Start hooks check in background
+	hookRunner := newHookRunner(cfg)
+	hooksChan := hookRunner.StartStatusCheck()
 
 	// Start version check in background
 	versionChan := update.GetVersion(version)
 
-	// Start hooks check in background
-	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), cwd, cfg.GetTargetDir())
-	hooksChan := hookRunner.StartStatusCheck()
-
-	// Print dotfiles status while hooks and version check run
-	checker := status.New(cfg)
-	var allOk bool
-	if *quiet {
-		allOk, _, err = checker.Check()
-	} else if *verbose {
-		allOk, err = checker.PrintVerbose(con.Stdout)
-	} else {
-		allOk, err = checker.PrintSummary(con.Stdout)
-	}
+	// Check dotfile status
+	linker := link.New(cfg)
+	results, err := linker.Check()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
+	}
+
+	allOk := true
+	p.Header("links")
+	for _, r := range results {
+		r.Target = formatTargetPath(cfg, r.Target)
+		p.PrintLink(r)
+		if r.Status != link.StatusLinked {
+			allOk = false
+		}
 	}
 
 	// Wait for hooks and print results
 	hookResult := <-hooksChan
 	if hookResult.Err != nil {
-		fmt.Fprintf(os.Stderr, "Error running status hooks: %v\n", hookResult.Err)
+		p.Errorf("Error running status hooks: %v", hookResult.Err)
 		return 1
 	}
 
-	hooksOk := printHooksSummary(con.Stdout, hookResult.Hooks)
+	hooksOk := true
+	if len(hookResult.Hooks) > 0 {
+		p.Header("hooks")
+		for _, h := range hookResult.Hooks {
+			p.PrintHookStatus(h)
+			if !h.Ok() {
+				hooksOk = false
+			}
+		}
+	}
 
-	// Show dottie version and update status
-	fmt.Printf("dottie: %s", version)
+	// Show dottie info
+	binary, _ := os.Executable()
+	configPath := filepath.Join(cfg.RepoRoot(), cfg.File())
 	select {
 	case vr := <-versionChan:
 		if vr.Err == nil {
-			if vr.UpToDate {
-				fmt.Printf(" %s(up to date)%s", colorGreen, colorReset)
-			} else {
-				fmt.Printf(" %s(update available: %s)%s", colorYellow, vr.Latest, colorReset)
-			}
+			p.PrintDottieStatus(binary, configPath, version, vr.Latest, vr.UpToDate)
+		} else {
+			p.PrintDottieStatus(binary, configPath, version, "", true)
 		}
 	case <-time.After(2 * time.Second):
+		p.PrintDottieStatus(binary, configPath, version, "", true)
 	}
-	fmt.Println()
 
 	if !allOk || !hooksOk {
 		return 1
@@ -437,39 +304,45 @@ func runStatus(args []string) int {
 	return 0
 }
 
-// printHooksSummary prints [ok]/[x] lines for hooks. Returns true if all ok.
-func printHooksSummary(w io.Writer, hookStatuses []hooks.HookStatus) bool {
-	if len(hookStatuses) == 0 {
-		return true
+// formatTargetPath replaces the home directory prefix with ~ for display.
+func formatTargetPath(cfg *config.Config, path string) string {
+	home, _ := os.UserHomeDir()
+	if cfg.TargetDir == home && strings.HasPrefix(path, home) {
+		return "~" + strings.TrimPrefix(path, home)
 	}
-
-	var okNames, failNames []string
-	for _, h := range hookStatuses {
-		name := hooks.DisplayName(h.Name)
-		if h.Ok {
-			okNames = append(okNames, name)
-		} else {
-			failNames = append(failNames, name)
-		}
-	}
-
-	fmt.Fprintln(w, "hooks:")
-	if len(okNames) > 0 {
-		fmt.Fprintf(w, "  %s✓%s %s\n", colorGreen, colorReset, strings.Join(okNames, ", "))
-	}
-	if len(failNames) > 0 {
-		fmt.Fprintf(w, "  %sx%s %s\n", colorRed, colorReset, strings.Join(failNames, ", "))
-	}
-
-	return len(failNames) == 0
+	return path
 }
 
-func runUpdate() int {
+func cmdUpdate() int {
 	if err := update.Install(version); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 	return 0
+}
+
+func runHooksPhase(runner *hooks.Runner, p *console.Printer, phase string, dryRun bool) (ok, total int) {
+	p.Header("hooks " + phase)
+	for r := range runner.RunPhase(phase, dryRun) {
+		p.PrintHook(r, phase)
+		total++
+		if r.Ok() {
+			ok++
+		}
+	}
+	return ok, total
+}
+
+func newHookRunner(cfg *config.Config) *hooks.Runner {
+	cwd, _ := os.Getwd()
+	return hooks.New(cfg.GetHooksPath(), hooks.EnvVars{
+		"DOTTIE_ROOT": cwd,
+		"DOTTIE_HOME": cfg.GetTargetDir(),
+	})
+}
+
+func fatal(err error) int {
+	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	return 1
 }
 
 func loadConfig() (*config.Config, error) {

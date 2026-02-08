@@ -147,7 +147,7 @@ func getGitRemoteURL(dir string) string {
 }
 
 // Init creates a new dotfiles repository structure.
-func Init(dir string, dryRun bool) error {
+func Init(dir string) error {
 	if dir == "" {
 		dir = "."
 	}
@@ -162,15 +162,6 @@ func Init(dir string, dryRun bool) error {
 	// Check if already initialized
 	if _, err := os.Stat(configPath); err == nil {
 		return fmt.Errorf("directory already contains dottie.yaml")
-	}
-
-	if dryRun {
-		fmt.Println("[dry-run] would create:")
-		fmt.Printf("  %s\n", configPath)
-		fmt.Printf("  %s\n", filepath.Join(absDir, "home/"))
-		fmt.Printf("  %s\n", filepath.Join(absDir, "hooks/"))
-		fmt.Printf("  %s\n", filepath.Join(absDir, "README.md"))
-		return nil
 	}
 
 	// Create main directory
