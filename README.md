@@ -1,6 +1,6 @@
 # dottie
 
-A simple dotfiles manager for macOS and Linux. Keep your dotfiles in a git repo, sync them across machines, and use hooks to  basic system setup with tools like homebrew, apt or mise.
+A simple dotfiles manager for macOS and Linux. Keep your dotfiles in a git repo, sync them across machines, and use hooks for basic system setup with tools like homebrew, apt or mise.
 
 ## Installation
 
