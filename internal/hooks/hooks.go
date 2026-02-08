@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,129 +10,104 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"github.com/clutchski/dottie/internal/console"
 )
+
+// EnvVars holds environment variables passed to hook scripts.
+type EnvVars map[string]string
+
+// NoEnv is an empty set of environment variables (for tests and List).
+var NoEnv = EnvVars{}
 
 // Runner executes hook scripts.
 type Runner struct {
 	hooksDir string
-	rootDir  string
-	homeDir  string
+	env      EnvVars
 }
 
 // New creates a new hook Runner.
 // hooksDir is the path to the hooks directory.
-// rootDir is the dotfiles repository root (set as DOTTIE_ROOT).
-// homeDir is the target home directory (set as DOTTIE_HOME).
-func New(hooksDir, rootDir, homeDir string) *Runner {
+// env is additional environment variables set on each hook process.
+func New(hooksDir string, env EnvVars) *Runner {
 	return &Runner{
 		hooksDir: hooksDir,
-		rootDir:  rootDir,
-		homeDir:  homeDir,
+		env:      env,
 	}
 }
 
-// Run executes all hooks with the given phase in parallel.
-// Phase should be one of: "pre-link", "post-link", "status".
-// Output is written to con.Stdout and con.Stderr.
-// Environment variables DOTTIE_ROOT, DOTTIE_HOME, and DOTTIE_DRY_RUN are set.
-func (r *Runner) Run(phase string, dryRun, verbose bool, con *console.Console) error {
-	scripts, err := r.List()
+// HookResult is the outcome of running a single hook.
+type HookResult struct {
+	Name     string
+	ExitCode int
+	Elapsed  time.Duration
+	Output   string // captured stdout+stderr
+}
+
+// Ok returns true if the hook exited successfully.
+func (r HookResult) Ok() bool { return r.ExitCode == 0 }
+
+// RunPhase runs all hooks for a phase in parallel, streaming results on a channel.
+// The channel closes when all hooks complete.
+func (r *Runner) RunPhase(phase string, dryRun bool) <-chan HookResult {
+	ch := make(chan HookResult, 16)
+
+	go func() {
+		defer close(ch)
+
+		scripts, err := r.List()
+		if err != nil || len(scripts) == 0 {
+			return
+		}
+
+		var wg sync.WaitGroup
+		for _, script := range scripts {
+			wg.Add(1)
+			go func(path string) {
+				defer wg.Done()
+				ch <- r.runHook(path, phase, dryRun)
+			}(script)
+		}
+		wg.Wait()
+	}()
+
+	return ch
+}
+
+func (r *Runner) runHook(path, phase string, dryRun bool) HookResult {
+	name := DisplayName(filepath.Base(path))
+	start := time.Now()
+
+	cmd := exec.Command(path, phase)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	cmd.Env = r.buildEnv("DOTTIE_DRY_RUN", boolToString(dryRun))
+
+	err := cmd.Run()
+	exitCode := 0
 	if err != nil {
-		return err
-	}
-
-	if len(scripts) == 0 {
-		return nil
-	}
-
-	if verbose {
-		fmt.Fprintf(con.Stdout, "\nhooks %s:\n", phase)
-	}
-
-	// Run all hooks in parallel
-	errors := make([]error, len(scripts))
-	var wg sync.WaitGroup
-	for i, script := range scripts {
-		wg.Add(1)
-		go func(idx int, path string) {
-			defer wg.Done()
-			name := DisplayName(filepath.Base(path))
-			if verbose {
-				fmt.Fprintf(con.Stdout, "  \033[33m◎\033[0m start: %s\n", name)
-			}
-			start := time.Now()
-			if err := r.runScript(path, phase, dryRun, con); err != nil {
-				errors[idx] = fmt.Errorf("hook %s failed: %w", name, err)
-				if verbose {
-					fmt.Fprintf(con.Stdout, "  \033[31mx\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
-				}
-			} else if verbose {
-				fmt.Fprintf(con.Stdout, "  \033[32m✓\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
-			}
-		}(i, script)
-	}
-	wg.Wait()
-
-	// Return first error if any
-	for _, err := range errors {
-		if err != nil {
-			return err
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
 		}
 	}
 
-	return nil
-}
-
-// RunAll executes all hooks for a phase and returns per-hook results.
-// Unlike Run, it does not stop on the first error.
-func (r *Runner) RunAll(phase string, dryRun, verbose bool, con *console.Console) ([]HookStatus, error) {
-	scripts, err := r.List()
-	if err != nil {
-		return nil, err
+	return HookResult{
+		Name:     name,
+		ExitCode: exitCode,
+		Elapsed:  time.Since(start),
+		Output:   buf.String(),
 	}
-
-	if len(scripts) == 0 {
-		return nil, nil
-	}
-
-	if verbose {
-		fmt.Fprintf(con.Stdout, "\nhooks %s:\n", phase)
-	}
-
-	statuses := make([]HookStatus, len(scripts))
-	var wg sync.WaitGroup
-	for i, script := range scripts {
-		wg.Add(1)
-		go func(idx int, path string) {
-			defer wg.Done()
-			baseName := filepath.Base(path)
-			name := DisplayName(baseName)
-			if verbose {
-				fmt.Fprintf(con.Stdout, "  \033[33m◎\033[0m start: %s\n", name)
-			}
-			start := time.Now()
-			err := r.runScript(path, phase, dryRun, con)
-			statuses[idx] = HookStatus{Name: baseName, Ok: err == nil}
-			if verbose {
-				if err != nil {
-					fmt.Fprintf(con.Stdout, "  \033[31mx\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
-				} else {
-					fmt.Fprintf(con.Stdout, "  \033[32m✓\033[0m done:  %s (%.1fs)\n", name, time.Since(start).Seconds())
-				}
-			}
-		}(i, script)
-	}
-	wg.Wait()
-
-	return statuses, nil
 }
 
 // HookStatus represents the status of a single hook.
 type HookStatus struct {
-	Name string
-	Ok   bool
+	Name     string
+	ExitCode int
 }
+
+// Ok returns true if the hook exited successfully.
+func (s HookStatus) Ok() bool { return s.ExitCode == 0 }
 
 // StatusResult holds the results of hook status checks.
 type StatusResult struct {
@@ -156,16 +132,16 @@ func (r *Runner) StartStatusCheck() <-chan StatusResult {
 			return
 		}
 
-		// Run all hooks in parallel
 		statuses := make([]HookStatus, len(scripts))
 		var wg sync.WaitGroup
 		for i, script := range scripts {
 			wg.Add(1)
 			go func(idx int, path string) {
 				defer wg.Done()
+				exitCode := r.runStatusScript(path)
 				statuses[idx] = HookStatus{
-					Name: filepath.Base(path),
-					Ok:   r.runStatusScript(path),
+					Name:     filepath.Base(path),
+					ExitCode: exitCode,
 				}
 			}(i, script)
 		}
@@ -219,35 +195,31 @@ func (r *Runner) List() ([]string, error) {
 	return scripts, nil
 }
 
-// runStatusScript runs a hook with "status" phase silently and returns true if exit code is 0.
-func (r *Runner) runStatusScript(path string) bool {
+// runStatusScript runs a hook with "status" phase silently and returns the exit code.
+func (r *Runner) runStatusScript(path string) int {
 	cmd := exec.Command(path, "status")
+	cmd.Env = r.buildEnv("DOTTIE_DRY_RUN", "false")
 
-	// Set environment variables
-	cmd.Env = append(os.Environ(),
-		"DOTTIE_ROOT="+r.rootDir,
-		"DOTTIE_HOME="+r.homeDir,
-		"DOTTIE_DRY_RUN=false",
-	)
-
-	// Run silently - we only care about exit code
 	err := cmd.Run()
-	return err == nil
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode()
+		}
+		return 1
+	}
+	return 0
 }
 
-func (r *Runner) runScript(path, phase string, dryRun bool, con *console.Console) error {
-	cmd := exec.Command(path, phase)
-	cmd.Stdout = con.Stdout
-	cmd.Stderr = con.Stderr
-
-	// Set environment variables
-	cmd.Env = append(os.Environ(),
-		"DOTTIE_ROOT="+r.rootDir,
-		"DOTTIE_HOME="+r.homeDir,
-		"DOTTIE_DRY_RUN="+boolToString(dryRun),
-	)
-
-	return cmd.Run()
+// buildEnv returns os.Environ() plus the runner's env vars and any extra key=value pairs.
+func (r *Runner) buildEnv(extra ...string) []string {
+	env := os.Environ()
+	for k, v := range r.env {
+		env = append(env, k+"="+v)
+	}
+	for i := 0; i+1 < len(extra); i += 2 {
+		env = append(env, extra[i]+"="+extra[i+1])
+	}
+	return env
 }
 
 func isExecutable(path string) bool {
@@ -255,8 +227,6 @@ func isExecutable(path string) bool {
 	if err != nil {
 		return false
 	}
-
-	// Check if any execute bit is set
 	return info.Mode()&0111 != 0
 }
 
