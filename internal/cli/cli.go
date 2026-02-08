@@ -130,10 +130,8 @@ func runRun(args []string) int {
 	// Run pre-link hooks
 	p.Header("hooks pre-link")
 	for r := range hookRunner.RunPhase("pre-link", *dryRun) {
-		if r.Ok() {
-			p.HookOk(r.Name, r.Elapsed)
-		} else {
-			p.HookFail(r.Name, "pre-link", r.Elapsed, r.Output)
+		p.PrintHook(r, "pre-link")
+		if !r.Ok() {
 			failed = true
 		}
 	}
@@ -148,18 +146,8 @@ func runRun(args []string) int {
 
 	p.Header("dotfiles")
 	for _, r := range results {
-		switch r.Status {
-		case link.StatusLinked, link.StatusAlreadyLinked, link.StatusWouldLink:
-			p.DotfileOk(r.Name, r.Target)
-		case link.StatusError:
-			msg := "error"
-			if r.Error != nil {
-				msg = r.Error.Error()
-			}
-			p.DotfileFail(r.Name, msg)
-			failed = true
-		case link.StatusSkipped:
-			p.DotfileFail(r.Name, "skipped")
+		p.PrintLink(r)
+		if r.Status == link.StatusError {
 			failed = true
 		}
 	}
@@ -167,10 +155,8 @@ func runRun(args []string) int {
 	// Run post-link hooks
 	p.Header("hooks post-link")
 	for r := range hookRunner.RunPhase("post-link", *dryRun) {
-		if r.Ok() {
-			p.HookOk(r.Name, r.Elapsed)
-		} else {
-			p.HookFail(r.Name, "post-link", r.Elapsed, r.Output)
+		p.PrintHook(r, "post-link")
+		if !r.Ok() {
 			failed = true
 		}
 	}
@@ -277,10 +263,8 @@ func runHooksRun(args []string) int {
 	failed := false
 	p.Header("hooks " + phase)
 	for r := range hookRunner.RunPhase(phase, *dryRun) {
-		if r.Ok() {
-			p.HookOk(r.Name, r.Elapsed)
-		} else {
-			p.HookFail(r.Name, phase, r.Elapsed, r.Output)
+		p.PrintHook(r, phase)
+		if !r.Ok() {
 			failed = true
 		}
 	}
@@ -330,14 +314,9 @@ func runStatus(args []string) int {
 	allOk := true
 	p.Header("dotfiles")
 	for _, r := range results {
-		switch r.Status {
-		case link.StatusLinked:
-			p.DotfileOk(r.Name, formatTargetPath(cfg, r.Target))
-		case link.StatusMissing:
-			p.DotfileFail(r.Name, r.Message)
-			allOk = false
-		case link.StatusDiff:
-			p.DotfileFail(r.Name, r.Message)
+		r.Target = formatTargetPath(cfg, r.Target)
+		p.PrintLink(r)
+		if r.Status != link.StatusLinked {
 			allOk = false
 		}
 	}
@@ -353,11 +332,8 @@ func runStatus(args []string) int {
 	if len(hookResult.Hooks) > 0 {
 		p.Header("hooks")
 		for _, h := range hookResult.Hooks {
-			name := hooks.DisplayName(h.Name)
-			if h.Ok() {
-				p.HookOk(name, 0)
-			} else {
-				p.DotfileFail(name, "hook failed")
+			p.PrintHookStatus(h)
+			if !h.Ok() {
 				hooksOk = false
 			}
 		}

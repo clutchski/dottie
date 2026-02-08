@@ -18,7 +18,6 @@ const (
 	StatusLinked Status = iota
 	StatusWouldLink
 	StatusAlreadyLinked
-	StatusSkipped
 	StatusError
 	StatusMissing // target doesn't exist
 	StatusDiff    // target exists but points elsewhere
@@ -32,8 +31,6 @@ func (s Status) String() string {
 		return "would link"
 	case StatusAlreadyLinked:
 		return "already linked"
-	case StatusSkipped:
-		return "skipped"
 	case StatusError:
 		return "error"
 	case StatusMissing:
