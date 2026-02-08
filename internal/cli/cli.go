@@ -113,14 +113,16 @@ func cmdRun(args []string) int {
 	}
 
 	hookRunner := newHookRunner(cfg)
-	failed := false
+	preOk, preTotal := 0, 0
+	postOk, postTotal := 0, 0
 
 	// Run pre-link hooks
 	p.Header("hooks pre-link")
 	for r := range hookRunner.RunPhase("pre-link", *dryRun) {
 		p.PrintHook(r, "pre-link")
-		if !r.Ok() {
-			failed = true
+		preTotal++
+		if r.Ok() {
+			preOk++
 		}
 	}
 
@@ -131,11 +133,12 @@ func cmdRun(args []string) int {
 		return fatal(err)
 	}
 
+	linksOk := 0
 	p.Header("dotfiles")
 	for _, r := range results {
 		p.PrintLink(r)
-		if r.Status == link.StatusError {
-			failed = true
+		if r.Status != link.StatusError {
+			linksOk++
 		}
 	}
 
@@ -143,10 +146,26 @@ func cmdRun(args []string) int {
 	p.Header("hooks post-link")
 	for r := range hookRunner.RunPhase("post-link", *dryRun) {
 		p.PrintHook(r, "post-link")
-		if !r.Ok() {
-			failed = true
+		postTotal++
+		if r.Ok() {
+			postOk++
 		}
 	}
+
+	failed := linksOk < len(results) || preOk < preTotal || postOk < postTotal
+	symbol := "✓"
+	if failed {
+		symbol = "✗"
+	}
+	summary := fmt.Sprintf("%s dottie", symbol)
+	if preTotal > 0 {
+		summary += fmt.Sprintf("   hooks:pre %d/%d", preOk, preTotal)
+	}
+	summary += fmt.Sprintf("   links %d/%d", linksOk, len(results))
+	if postTotal > 0 {
+		summary += fmt.Sprintf("   hooks:post %d/%d", postOk, postTotal)
+	}
+	fmt.Println(summary)
 
 	if failed {
 		return 1
