@@ -93,8 +93,7 @@ func runInit(args []string) int {
 	}
 
 	if err := dotinit.Init(dir, *dryRun); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
 	if !*dryRun {
@@ -116,15 +115,10 @@ func runRun(args []string) int {
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
-	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), hooks.EnvVars{
-		"DOTTIE_ROOT": cwd,
-		"DOTTIE_HOME": cfg.GetTargetDir(),
-	})
+	hookRunner := newHookRunner(cfg)
 	failed := false
 
 	// Run pre-link hooks
@@ -140,8 +134,7 @@ func runRun(args []string) int {
 	linker := link.New(cfg)
 	results, err := linker.Link(*dryRun, *force)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
 	p.Header("dotfiles")
@@ -201,20 +194,14 @@ Examples:
 func runHooksList(args []string) int {
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
-	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), hooks.EnvVars{
-		"DOTTIE_ROOT": cwd,
-		"DOTTIE_HOME": cfg.GetTargetDir(),
-	})
+	hookRunner := newHookRunner(cfg)
 
 	hooksList, err := hookRunner.List()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
 	if len(hooksList) == 0 {
@@ -249,15 +236,10 @@ func runHooksRun(args []string) int {
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
-	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), hooks.EnvVars{
-		"DOTTIE_ROOT": cwd,
-		"DOTTIE_HOME": cfg.GetTargetDir(),
-	})
+	hookRunner := newHookRunner(cfg)
 	p := console.New(*verbose)
 
 	failed := false
@@ -285,16 +267,11 @@ func runStatus(args []string) int {
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
 	// Start hooks check in background
-	cwd, _ := os.Getwd()
-	hookRunner := hooks.New(cfg.GetHooksPath(), hooks.EnvVars{
-		"DOTTIE_ROOT": cwd,
-		"DOTTIE_HOME": cfg.GetTargetDir(),
-	})
+	hookRunner := newHookRunner(cfg)
 	hooksChan := hookRunner.StartStatusCheck()
 
 	// Start version check in background (verbose only)
@@ -307,8 +284,7 @@ func runStatus(args []string) int {
 	linker := link.New(cfg)
 	results, err := linker.Check()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 
 	allOk := true
@@ -371,10 +347,22 @@ func formatTargetPath(cfg *config.Config, path string) string {
 
 func runUpdate() int {
 	if err := update.Install(version); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		return fatal(err)
 	}
 	return 0
+}
+
+func newHookRunner(cfg *config.Config) *hooks.Runner {
+	cwd, _ := os.Getwd()
+	return hooks.New(cfg.GetHooksPath(), hooks.EnvVars{
+		"DOTTIE_ROOT": cwd,
+		"DOTTIE_HOME": cfg.GetTargetDir(),
+	})
+}
+
+func fatal(err error) int {
+	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	return 1
 }
 
 func loadConfig() (*config.Config, error) {
