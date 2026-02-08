@@ -1,18 +1,14 @@
 # dottie
 
-A simple dotfiles manager for macOS and Linux. Keep your dotfiles in a git repo, sync them across machines, and do basic machine setup.
+A simple dotfiles manager for macOS and Linux. Keep your dotfiles in a git repo, sync them across machines, and use hooks to  basic system setup with tools like homebrew, apt or mise.
 
 ## Installation
-
-### Quick Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/install.sh | bash
 ```
 
-This auto-detects your OS and architecture and installs the latest release.
-
-Or install a [recent release](https://github.com/clutchski/dottie/releases) manually.
+This auto-detects your OS and architecture and installs the latest release. Or install a [recent release](https://github.com/clutchski/dottie/releases) manually.
 
 ## Quick Start
 
@@ -24,6 +20,8 @@ Create a git repo to store your configuration files:
 mkdir ~/dotfiles && cd ~/dotfiles
 git init
 dottie init
+git add
+git commit -m "first commit" && git push
 ```
 
 This creates the repo structure: `home/` for dotfiles, `hooks/` for scripts, and `dottie.yaml` for config.
@@ -74,8 +72,6 @@ Initialize a new dotfiles repository structure.
 
 ```bash
 dottie init              # current directory
-dottie init ~/dotfiles   # specific directory
-dottie init -n           # dry-run
 ```
 
 ### `dottie run`
@@ -83,14 +79,12 @@ dottie init -n           # dry-run
 Run hooks and create symlinks from your dotfiles repo to your home directory. Runs pre-link hooks, creates symlinks, then runs post-link hooks.
 
 ```bash
-dottie run              # create symlinks
-dottie run -n           # dry-run (show what would happen)
-dottie run -f           # force (overwrite existing files)
+dottie run
 ```
 
 ### `dottie hooks list`
 
-List active hooks (executable files in `hooks/` that are not hidden or example files).
+List active hooks (executable files in `hooks/`).
 
 ```bash
 dottie hooks list
