@@ -38,15 +38,15 @@ func Run(args []string) int {
 
 	switch args[0] {
 	case "init":
-		return runInit(args[1:])
+		return cmdInit(args[1:])
 	case "run":
-		return runRun(args[1:])
+		return cmdRun(args[1:])
 	case "hooks":
-		return runHooks(args[1:])
+		return cmdHooks(args[1:])
 	case "status":
-		return runStatus(args[1:])
+		return cmdStatus(args[1:])
 	case "update":
-		return runUpdate()
+		return cmdUpdate()
 	case "version", "--version", "-v":
 		printVersion()
 		return 0
@@ -82,29 +82,23 @@ func printVersion() {
 	fmt.Printf("  built:  %s\n", date)
 }
 
-func runInit(args []string) int {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	dryRun := fs.Bool("n", false, "dry-run")
-	_ = fs.Parse(args)
-
+func cmdInit(args []string) int {
 	dir := "."
-	if fs.NArg() > 0 {
-		dir = fs.Arg(0)
+	if len(args) > 0 {
+		dir = args[0]
 	}
 
-	if err := dotinit.Init(dir, *dryRun); err != nil {
+	if err := dotinit.Init(dir); err != nil {
 		return fatal(err)
 	}
 
-	if !*dryRun {
-		absDir, _ := filepath.Abs(dir)
-		fmt.Printf("Initialized dotfiles repository at %s\n", absDir)
-	}
+	absDir, _ := filepath.Abs(dir)
+	fmt.Printf("Initialized dotfiles repository at %s\n", absDir)
 
 	return 0
 }
 
-func runRun(args []string) int {
+func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
 	force := fs.Bool("f", false, "force")
@@ -160,7 +154,7 @@ func runRun(args []string) int {
 	return 0
 }
 
-func runHooks(args []string) int {
+func cmdHooks(args []string) int {
 	if len(args) < 1 {
 		printHooksUsage()
 		return 1
@@ -168,9 +162,9 @@ func runHooks(args []string) int {
 
 	switch args[0] {
 	case "list":
-		return runHooksList(args[1:])
+		return cmdHooksList(args[1:])
 	case "run":
-		return runHooksRun(args[1:])
+		return cmdHooksRun(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown hooks subcommand: %s\n", args[0])
 		printHooksUsage()
@@ -191,7 +185,7 @@ Examples:
   dottie hooks run status`)
 }
 
-func runHooksList(args []string) int {
+func cmdHooksList(args []string) int {
 	cfg, err := loadConfig()
 	if err != nil {
 		return fatal(err)
@@ -217,7 +211,7 @@ func runHooksList(args []string) int {
 	return 0
 }
 
-func runHooksRun(args []string) int {
+func cmdHooksRun(args []string) int {
 	fs := flag.NewFlagSet("hooks run", flag.ExitOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
 	verbose := fs.Bool("v", false, "verbose")
@@ -257,7 +251,7 @@ func runHooksRun(args []string) int {
 	return 0
 }
 
-func runStatus(args []string) int {
+func cmdStatus(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	verbose := fs.Bool("v", false, "verbose")
 	_ = fs.Parse(args)
@@ -345,7 +339,7 @@ func formatTargetPath(cfg *config.Config, path string) string {
 	return path
 }
 
-func runUpdate() int {
+func cmdUpdate() int {
 	if err := update.Install(version); err != nil {
 		return fatal(err)
 	}
