@@ -8,7 +8,7 @@ A simple dotfiles manager for macOS and Linux. Keep your dotfiles in a git repo,
 curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/install.sh | bash
 ```
 
-This auto-detects your OS and architecture and installs the latest release. Or install a [recent release](https://github.com/clutchski/dottie/releases) manually.
+This auto-detects your OS and architecture and installs the latest release to `~/.local.bin`. Or install a [recent release](https://github.com/clutchski/dottie/releases) manually.
 
 ## Quick Start
 
