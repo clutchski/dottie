@@ -15,8 +15,6 @@ import (
 // EnvVars holds environment variables passed to hook scripts.
 type EnvVars map[string]string
 
-// NoEnv is an empty set of environment variables (for tests and List).
-var NoEnv = EnvVars{}
 
 // Runner executes hook scripts.
 type Runner struct {

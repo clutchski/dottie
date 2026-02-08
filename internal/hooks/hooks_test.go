@@ -9,6 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// NoEnv is an empty set of environment variables for test readability.
+var NoEnv = EnvVars{}
+
 func collectResults(ch <-chan HookResult) []HookResult {
 	var results []HookResult
 	for r := range ch {
