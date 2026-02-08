@@ -296,7 +296,8 @@ func runStatus(args []string) int {
 	verbose := fs.Bool("v", false, "verbose")
 	_ = fs.Parse(args)
 
-	p := console.New(*verbose)
+	// Status always shows results; -v adds version info
+	p := console.New(true)
 
 	cfg, err := loadConfig()
 	if err != nil {
