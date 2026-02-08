@@ -124,7 +124,7 @@ func cmdRun(args []string) int {
 	}
 
 	linksOk := 0
-	p.Header("dotfiles")
+	p.Header("links")
 	for _, r := range results {
 		p.PrintLink(r)
 		if r.Status != link.StatusError {
@@ -192,7 +192,7 @@ func cmdHooksList(args []string) int {
 		return 0
 	}
 
-	fmt.Println("Active hooks:")
+	fmt.Println("hooks:")
 	for _, h := range hooksList {
 		fmt.Printf("  %s\n", filepath.Base(h))
 	}
@@ -203,7 +203,6 @@ func cmdHooksList(args []string) int {
 func cmdHooksRun(args []string) int {
 	fs := flag.NewFlagSet("hooks run", flag.ExitOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
-	verbose := fs.Bool("v", false, "verbose")
 	_ = fs.Parse(args)
 
 	if fs.NArg() < 1 {
@@ -223,7 +222,7 @@ func cmdHooksRun(args []string) int {
 	}
 
 	hookRunner := newHookRunner(cfg)
-	p := console.New(*verbose)
+	p := console.New(true)
 
 	ok, total := runHooksPhase(hookRunner, p, phase, *dryRun)
 	if ok < total {
@@ -234,10 +233,8 @@ func cmdHooksRun(args []string) int {
 
 func cmdStatus(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
-	verbose := fs.Bool("v", false, "verbose")
 	_ = fs.Parse(args)
 
-	// Status always shows results; -v adds version info
 	p := console.New(true)
 
 	cfg, err := loadConfig()
@@ -249,11 +246,8 @@ func cmdStatus(args []string) int {
 	hookRunner := newHookRunner(cfg)
 	hooksChan := hookRunner.StartStatusCheck()
 
-	// Start version check in background (verbose only)
-	var versionChan <-chan update.VersionStatus
-	if *verbose {
-		versionChan = update.GetVersion(version)
-	}
+	// Start version check in background
+	versionChan := update.GetVersion(version)
 
 	// Check dotfile status
 	linker := link.New(cfg)
@@ -263,7 +257,7 @@ func cmdStatus(args []string) int {
 	}
 
 	allOk := true
-	p.Header("dotfiles")
+	p.Header("links")
 	for _, r := range results {
 		r.Target = formatTargetPath(cfg, r.Target)
 		p.PrintLink(r)
@@ -290,19 +284,18 @@ func cmdStatus(args []string) int {
 		}
 	}
 
-	// Show version (verbose only)
-	if versionChan != nil {
-		select {
-		case vr := <-versionChan:
-			if vr.Err == nil {
-				if vr.UpToDate {
-					fmt.Printf("dottie: %s (up to date)\n", version)
-				} else {
-					fmt.Printf("dottie: %s (update available: %s)\n", version, vr.Latest)
-				}
-			}
-		case <-time.After(2 * time.Second):
+	// Show dottie info
+	binary, _ := os.Executable()
+	configPath := filepath.Join(cfg.RepoRoot(), cfg.File())
+	select {
+	case vr := <-versionChan:
+		if vr.Err == nil {
+			p.PrintDottieStatus(binary, configPath, version, vr.Latest, vr.UpToDate)
+		} else {
+			p.PrintDottieStatus(binary, configPath, version, "", true)
 		}
+	case <-time.After(2 * time.Second):
+		p.PrintDottieStatus(binary, configPath, version, "", true)
 	}
 
 	if !allOk || !hooksOk {
