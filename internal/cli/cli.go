@@ -113,18 +113,8 @@ func cmdRun(args []string) int {
 	}
 
 	hookRunner := newHookRunner(cfg)
-	preOk, preTotal := 0, 0
-	postOk, postTotal := 0, 0
-
 	// Run pre-link hooks
-	p.Header("hooks pre-link")
-	for r := range hookRunner.RunPhase("pre-link", *dryRun) {
-		p.PrintHook(r, "pre-link")
-		preTotal++
-		if r.Ok() {
-			preOk++
-		}
-	}
+	preOk, preTotal := runHooksPhase(hookRunner, p, "pre-link", *dryRun)
 
 	// Link dotfiles
 	linker := link.New(cfg)
@@ -143,14 +133,7 @@ func cmdRun(args []string) int {
 	}
 
 	// Run post-link hooks
-	p.Header("hooks post-link")
-	for r := range hookRunner.RunPhase("post-link", *dryRun) {
-		p.PrintHook(r, "post-link")
-		postTotal++
-		if r.Ok() {
-			postOk++
-		}
-	}
+	postOk, postTotal := runHooksPhase(hookRunner, p, "post-link", *dryRun)
 
 	failed := linksOk < len(results) || preOk < preTotal || postOk < postTotal
 	symbol := "✓"
@@ -255,16 +238,8 @@ func cmdHooksRun(args []string) int {
 	hookRunner := newHookRunner(cfg)
 	p := console.New(*verbose)
 
-	failed := false
-	p.Header("hooks " + phase)
-	for r := range hookRunner.RunPhase(phase, *dryRun) {
-		p.PrintHook(r, phase)
-		if !r.Ok() {
-			failed = true
-		}
-	}
-
-	if failed {
+	ok, total := runHooksPhase(hookRunner, p, phase, *dryRun)
+	if ok < total {
 		return 1
 	}
 	return 0
@@ -363,6 +338,18 @@ func cmdUpdate() int {
 		return fatal(err)
 	}
 	return 0
+}
+
+func runHooksPhase(runner *hooks.Runner, p *console.Printer, phase string, dryRun bool) (ok, total int) {
+	p.Header("hooks " + phase)
+	for r := range runner.RunPhase(phase, dryRun) {
+		p.PrintHook(r, phase)
+		total++
+		if r.Ok() {
+			ok++
+		}
+	}
+	return ok, total
 }
 
 func newHookRunner(cfg *config.Config) *hooks.Runner {
