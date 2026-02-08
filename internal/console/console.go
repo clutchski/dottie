@@ -95,6 +95,24 @@ func (p *Printer) PrintHookStatus(s hooks.HookStatus) {
 	}
 }
 
+// Summary prints a one-line run summary with ok/total counts per phase.
+func (p *Printer) Summary(preOk, preTotal, linksOk, linksTotal, postOk, postTotal int) {
+	failed := linksOk < linksTotal || preOk < preTotal || postOk < postTotal
+	symbol := "✓"
+	if failed {
+		symbol = "✗"
+	}
+	summary := fmt.Sprintf("%s dottie", symbol)
+	if preTotal > 0 {
+		summary += fmt.Sprintf("   hooks:pre %d/%d", preOk, preTotal)
+	}
+	summary += fmt.Sprintf("   links %d/%d", linksOk, linksTotal)
+	if postTotal > 0 {
+		summary += fmt.Sprintf("   hooks:post %d/%d", postOk, postTotal)
+	}
+	fmt.Fprintln(p.out, summary)
+}
+
 // Errorf prints an error message to stderr. Always prints.
 func (p *Printer) Errorf(format string, args ...any) {
 	fmt.Fprintf(p.err, format+"\n", args...)

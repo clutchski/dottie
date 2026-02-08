@@ -135,22 +135,9 @@ func cmdRun(args []string) int {
 	// Run post-link hooks
 	postOk, postTotal := runHooksPhase(hookRunner, p, "post-link", *dryRun)
 
-	failed := linksOk < len(results) || preOk < preTotal || postOk < postTotal
-	symbol := "✓"
-	if failed {
-		symbol = "✗"
-	}
-	summary := fmt.Sprintf("%s dottie", symbol)
-	if preTotal > 0 {
-		summary += fmt.Sprintf("   hooks:pre %d/%d", preOk, preTotal)
-	}
-	summary += fmt.Sprintf("   links %d/%d", linksOk, len(results))
-	if postTotal > 0 {
-		summary += fmt.Sprintf("   hooks:post %d/%d", postOk, postTotal)
-	}
-	fmt.Println(summary)
+	p.Summary(preOk, preTotal, linksOk, len(results), postOk, postTotal)
 
-	if failed {
+	if linksOk < len(results) || preOk < preTotal || postOk < postTotal {
 		return 1
 	}
 	return 0

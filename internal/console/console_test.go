@@ -149,6 +149,32 @@ func TestNoHeaderFlush_WhenNotSet(t *testing.T) {
 	assert.Equal(t, "  FAIL x (bad)\n", out.String())
 }
 
+// --- Summary ---
+
+func TestSummary_AllOk(t *testing.T) {
+	p, out, _ := newTestPrinter(false)
+	p.Summary(3, 3, 30, 30, 2, 2)
+	assert.Equal(t, "✓ dottie   hooks:pre 3/3   links 30/30   hooks:post 2/2\n", out.String())
+}
+
+func TestSummary_Failures(t *testing.T) {
+	p, out, _ := newTestPrinter(false)
+	p.Summary(2, 3, 28, 30, 1, 2)
+	assert.Equal(t, "✗ dottie   hooks:pre 2/3   links 28/30   hooks:post 1/2\n", out.String())
+}
+
+func TestSummary_NoHooks(t *testing.T) {
+	p, out, _ := newTestPrinter(false)
+	p.Summary(0, 0, 12, 12, 0, 0)
+	assert.Equal(t, "✓ dottie   links 12/12\n", out.String())
+}
+
+func TestSummary_PreOnly(t *testing.T) {
+	p, out, _ := newTestPrinter(false)
+	p.Summary(2, 2, 10, 10, 0, 0)
+	assert.Equal(t, "✓ dottie   hooks:pre 2/2   links 10/10\n", out.String())
+}
+
 // --- Errorf ---
 
 func TestErrorf_AlwaysPrintsToStderr(t *testing.T) {
