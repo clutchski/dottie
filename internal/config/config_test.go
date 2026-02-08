@@ -11,7 +11,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 
 	// Create minimal config file (dottie.yaml, not .dottie.yaml)
 	configPath := filepath.Join(tmpDir, "dottie.yaml")
-	if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(""), 0o644); err != nil {
 		t.Fatalf("Failed to create config file: %v", err)
 	}
 
@@ -51,7 +51,7 @@ ignore:
 hooks_dir: scripts
 `
 	configPath := filepath.Join(tmpDir, ".dottie.yaml")
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
 		t.Fatalf("Failed to create config file: %v", err)
 	}
 
@@ -109,13 +109,14 @@ func TestIsDottieDir(t *testing.T) {
 	}{
 		{
 			name:  "empty directory",
-			setup: func(t *testing.T, dir string) {},
+			setup: func(t *testing.T, dir string) { t.Helper() },
 			want:  false,
 		},
 		{
 			name: "has dottie.yaml",
 			setup: func(t *testing.T, dir string) {
-				if err := os.WriteFile(filepath.Join(dir, "dottie.yaml"), []byte(""), 0644); err != nil {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, "dottie.yaml"), []byte(""), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -124,7 +125,8 @@ func TestIsDottieDir(t *testing.T) {
 		{
 			name: "has .dottie.yaml",
 			setup: func(t *testing.T, dir string) {
-				if err := os.WriteFile(filepath.Join(dir, ".dottie.yaml"), []byte(""), 0644); err != nil {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, ".dottie.yaml"), []byte(""), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -133,7 +135,8 @@ func TestIsDottieDir(t *testing.T) {
 		{
 			name: "has home dir",
 			setup: func(t *testing.T, dir string) {
-				if err := os.Mkdir(filepath.Join(dir, "home"), 0755); err != nil {
+				t.Helper()
+				if err := os.Mkdir(filepath.Join(dir, "home"), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -142,7 +145,8 @@ func TestIsDottieDir(t *testing.T) {
 		{
 			name: "has hooks dir",
 			setup: func(t *testing.T, dir string) {
-				if err := os.Mkdir(filepath.Join(dir, "hooks"), 0755); err != nil {
+				t.Helper()
+				if err := os.Mkdir(filepath.Join(dir, "hooks"), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -151,7 +155,8 @@ func TestIsDottieDir(t *testing.T) {
 		{
 			name: "has unrelated files only",
 			setup: func(t *testing.T, dir string) {
-				if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hi"), 0644); err != nil {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hi"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -174,7 +179,7 @@ func TestConfigFile_WithFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	configPath := filepath.Join(tmpDir, "dottie.yaml")
-	if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(""), 0o644); err != nil {
 		t.Fatalf("Failed to create config file: %v", err)
 	}
 
@@ -192,7 +197,7 @@ func TestConfigFile_WithDotFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	configPath := filepath.Join(tmpDir, ".dottie.yaml")
-	if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(""), 0o644); err != nil {
 		t.Fatalf("Failed to create config file: %v", err)
 	}
 

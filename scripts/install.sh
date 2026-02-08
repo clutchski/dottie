@@ -2,13 +2,8 @@
 set -e
 
 REPO="clutchski/dottie"
-if [ -z "$INSTALL_DIR" ]; then
-    if [ -d "$HOME/.local/bin" ]; then
-        INSTALL_DIR="$HOME/.local/bin"
-    else
-        INSTALL_DIR="/usr/local/bin"
-    fi
-fi
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+mkdir -p "$INSTALL_DIR"
 QUIET="${QUIET:-}"
 
 log() {
@@ -68,8 +63,4 @@ if ! curl -fsSL "$URL" | tar xz -C "$TMP_DIR"; then
 fi
 
 # Install
-if [ -w "$INSTALL_DIR" ]; then
-    mv "$TMP_DIR/dottie" "$INSTALL_DIR/dottie"
-else
-    sudo mv "$TMP_DIR/dottie" "$INSTALL_DIR/dottie"
-fi
+mv "$TMP_DIR/dottie" "$INSTALL_DIR/dottie"

@@ -1,0 +1,29 @@
+linters:
+  enable:
+    # Bugs and correctness
+    - errcheck       # unchecked errors
+    - errorlint      # errors.Is/As instead of == and type assertions
+    - gosec          # security issues (decompression bombs, etc.)
+    - unparam        # unused function parameters
+
+    # Better tests
+    - testifylint    # correct testify usage (assertion order, require vs assert)
+    - thelper        # test helpers should call t.Helper()
+
+    # Formatting
+    - gofumpt        # stricter gofmt
+
+linters-settings:
+  errcheck:
+    check-blank: true
+    exclude-functions:
+      - fmt.Fprint
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - fmt.Printf
+      - fmt.Println
+      - (net/http.ResponseWriter).Write
+  gosec:
+    excludes:
+      # G306: WriteFile permissions >0600. Hook scripts need +x; config files are non-sensitive.
+      - G306

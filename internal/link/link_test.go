@@ -18,7 +18,7 @@ source_dir: .
 add_dot: true
 conflict: backup
 `
-	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0o644))
 
 	cfg, err := config.Load(sourceDir)
 	require.NoError(t, err)
@@ -33,11 +33,11 @@ func TestLink_CreatesSymlink(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -62,11 +62,11 @@ func TestLink_DryRun(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -87,15 +87,15 @@ func TestLink_BackupsExistingFile(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	existingVimrc := filepath.Join(targetDir, ".vimrc")
 	existingContent := "existing content"
-	require.NoError(t, os.WriteFile(existingVimrc, []byte(existingContent), 0644))
+	require.NoError(t, os.WriteFile(existingVimrc, []byte(existingContent), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -124,14 +124,14 @@ func TestLink_ForceOverwrites(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	existingVimrc := filepath.Join(targetDir, ".vimrc")
-	require.NoError(t, os.WriteFile(existingVimrc, []byte("existing content"), 0644))
+	require.NoError(t, os.WriteFile(existingVimrc, []byte("existing content"), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -142,7 +142,8 @@ func TestLink_ForceOverwrites(t *testing.T) {
 	assert.True(t, isSymlink(existingVimrc), "expected symlink at %s", existingVimrc)
 
 	if fileExists(backupDir) {
-		files, _ := os.ReadDir(backupDir)
+		files, err := os.ReadDir(backupDir)
+		require.NoError(t, err)
 		assert.Empty(t, files, "expected no backup files with force")
 	}
 
@@ -156,12 +157,12 @@ func TestLink_ForceOverwritesBrokenSymlinks(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	// Create source file
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	// Create a broken symlink at target (points to non-existent file)
 	existingVimrc := filepath.Join(targetDir, ".vimrc")
@@ -196,11 +197,11 @@ func TestLink_SkipsAlreadyLinked(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	existingVimrc := filepath.Join(targetDir, ".vimrc")
 	require.NoError(t, os.Symlink(vimrc, existingVimrc))
@@ -221,13 +222,13 @@ func TestLink_LinksDirectory(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	configDir := filepath.Join(sourceDir, "config", "nvim")
-	require.NoError(t, os.MkdirAll(configDir, 0755))
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
 	initLua := filepath.Join(configDir, "init.lua")
-	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0644))
+	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -264,13 +265,13 @@ func TestLink_IgnoresConfiguredFiles(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 	readme := filepath.Join(sourceDir, "README.md")
-	require.NoError(t, os.WriteFile(readme, []byte("readme"), 0644))
+	require.NoError(t, os.WriteFile(readme, []byte("readme"), 0o644))
 
 	configContent := `
 source_dir: .
@@ -278,7 +279,7 @@ add_dot: true
 ignore:
   - README.md
 `
-	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0o644))
 
 	cfg, err := config.Load(sourceDir)
 	require.NoError(t, err)
@@ -301,20 +302,20 @@ func TestLink_LinksIntoExistingDirectory(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	// Create source config/starship.toml
 	sourceConfig := filepath.Join(sourceDir, "config")
-	require.NoError(t, os.MkdirAll(sourceConfig, 0755))
+	require.NoError(t, os.MkdirAll(sourceConfig, 0o755))
 	starshipSrc := filepath.Join(sourceConfig, "starship.toml")
-	require.NoError(t, os.WriteFile(starshipSrc, []byte("format = \"$directory\""), 0644))
+	require.NoError(t, os.WriteFile(starshipSrc, []byte("format = \"$directory\""), 0o644))
 
 	// Pre-existing .config/nvim in target (simulating user's existing config)
 	existingNvim := filepath.Join(targetDir, ".config", "nvim")
-	require.NoError(t, os.MkdirAll(existingNvim, 0755))
+	require.NoError(t, os.MkdirAll(existingNvim, 0o755))
 	existingInitLua := filepath.Join(existingNvim, "init.lua")
-	require.NoError(t, os.WriteFile(existingInitLua, []byte("-- user's nvim config"), 0644))
+	require.NoError(t, os.WriteFile(existingInitLua, []byte("-- user's nvim config"), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -347,26 +348,26 @@ func TestLink_PreservesExistingFilesInDirectory(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	// Create source config/alacritty.toml
 	sourceConfig := filepath.Join(sourceDir, "config")
-	require.NoError(t, os.MkdirAll(sourceConfig, 0755))
+	require.NoError(t, os.MkdirAll(sourceConfig, 0o755))
 	alacrittySrc := filepath.Join(sourceConfig, "alacritty.toml")
-	require.NoError(t, os.WriteFile(alacrittySrc, []byte("font_size = 14"), 0644))
+	require.NoError(t, os.WriteFile(alacrittySrc, []byte("font_size = 14"), 0o644))
 
 	// Pre-existing .config with nvim and karabiner (not in dotfiles)
 	existingConfig := filepath.Join(targetDir, ".config")
-	require.NoError(t, os.MkdirAll(existingConfig, 0755))
+	require.NoError(t, os.MkdirAll(existingConfig, 0o755))
 
 	existingNvim := filepath.Join(existingConfig, "nvim")
-	require.NoError(t, os.MkdirAll(existingNvim, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(existingNvim, "init.lua"), []byte("-- nvim"), 0644))
+	require.NoError(t, os.MkdirAll(existingNvim, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(existingNvim, "init.lua"), []byte("-- nvim"), 0o644))
 
 	existingKarabiner := filepath.Join(existingConfig, "karabiner")
-	require.NoError(t, os.MkdirAll(existingKarabiner, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(existingKarabiner, "config.json"), []byte("{}"), 0644))
+	require.NoError(t, os.MkdirAll(existingKarabiner, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(existingKarabiner, "config.json"), []byte("{}"), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -411,16 +412,16 @@ func TestCollectSourcePaths_CollectsFilesOnly(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	// Create a nested directory structure with files
 	configDir := filepath.Join(sourceDir, "config", "nvim")
-	require.NoError(t, os.MkdirAll(configDir, 0755))
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
 	initLua := filepath.Join(configDir, "init.lua")
-	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0644))
+	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0o644))
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -440,17 +441,17 @@ func TestCollectSourcePaths_IgnoresConfiguredDirectories(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	// Create files and directories, some of which should be ignored
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	// Create an ignored directory with files
 	gitDir := filepath.Join(sourceDir, ".git")
-	require.NoError(t, os.MkdirAll(gitDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("git config"), 0644))
+	require.NoError(t, os.MkdirAll(gitDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("git config"), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -469,14 +470,14 @@ func TestLink_MigratesOldDirectorySymlinks(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	// Create source config/nvim/init.lua
 	configDir := filepath.Join(sourceDir, "config", "nvim")
-	require.NoError(t, os.MkdirAll(configDir, 0755))
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
 	initLua := filepath.Join(configDir, "init.lua")
-	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0644))
+	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0o644))
 
 	// Create old-style directory symlink (simulating previous dottie behavior)
 	targetConfig := filepath.Join(targetDir, ".config")
@@ -512,15 +513,15 @@ func TestLink_ReplacesParentSymlinkWithDirectory(t *testing.T) {
 	backupDir := filepath.Join(tmpDir, "backup")
 	otherPlace := filepath.Join(tmpDir, "other")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
-	require.NoError(t, os.MkdirAll(otherPlace, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
+	require.NoError(t, os.MkdirAll(otherPlace, 0o755))
 
 	// Create source config/nvim/init.lua
 	configDir := filepath.Join(sourceDir, "config", "nvim")
-	require.NoError(t, os.MkdirAll(configDir, 0755))
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
 	initLua := filepath.Join(configDir, "init.lua")
-	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0644))
+	require.NoError(t, os.WriteFile(initLua, []byte("-- nvim config"), 0o644))
 
 	// Create ~/.config as symlink to a different place (not dotfiles)
 	targetConfig := filepath.Join(targetDir, ".config")
@@ -554,8 +555,8 @@ func TestComputeTargetPath(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
@@ -586,7 +587,7 @@ func createCheckConfig(t *testing.T, sourceDir, targetDir string) *config.Config
 source_dir: .
 add_dot: true
 `
-	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0o644))
 
 	cfg, err := config.Load(sourceDir)
 	require.NoError(t, err)
@@ -599,11 +600,11 @@ func TestCheck_Linked(t *testing.T) {
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 	require.NoError(t, os.Symlink(vimrc, filepath.Join(targetDir, ".vimrc")))
 
 	cfg := createCheckConfig(t, sourceDir, targetDir)
@@ -622,10 +623,10 @@ func TestCheck_Missing(t *testing.T) {
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
-	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0o644))
 
 	cfg := createCheckConfig(t, sourceDir, targetDir)
 	linker := New(cfg)
@@ -643,11 +644,11 @@ func TestCheck_Diff_RegularFile(t *testing.T) {
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
-	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(targetDir, ".vimrc"), []byte("different"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(targetDir, ".vimrc"), []byte("different"), 0o644))
 
 	cfg := createCheckConfig(t, sourceDir, targetDir)
 	linker := New(cfg)
@@ -665,13 +666,13 @@ func TestCheck_Diff_WrongSymlink(t *testing.T) {
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
-	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0o644))
 
 	otherFile := filepath.Join(tmpDir, "other")
-	require.NoError(t, os.WriteFile(otherFile, []byte("other"), 0644))
+	require.NoError(t, os.WriteFile(otherFile, []byte("other"), 0o644))
 	require.NoError(t, os.Symlink(otherFile, filepath.Join(targetDir, ".vimrc")))
 
 	cfg := createCheckConfig(t, sourceDir, targetDir)
@@ -690,11 +691,11 @@ func TestCheck_IgnoresConfiguredFiles(t *testing.T) {
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
-	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "README.md"), []byte("readme"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "vimrc"), []byte("set number"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "README.md"), []byte("readme"), 0o644))
 
 	configContent := `
 source_dir: .
@@ -702,7 +703,7 @@ add_dot: true
 ignore:
   - README.md
 `
-	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".dottie.yaml"), []byte(configContent), 0o644))
 
 	cfg, err := config.Load(sourceDir)
 	require.NoError(t, err)
@@ -721,16 +722,16 @@ func TestCheck_RecursesIntoDirectories(t *testing.T) {
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	sourceConfig := filepath.Join(sourceDir, "config")
-	require.NoError(t, os.MkdirAll(sourceConfig, 0755))
+	require.NoError(t, os.MkdirAll(sourceConfig, 0o755))
 	starshipSrc := filepath.Join(sourceConfig, "starship.toml")
-	require.NoError(t, os.WriteFile(starshipSrc, []byte("format"), 0644))
+	require.NoError(t, os.WriteFile(starshipSrc, []byte("format"), 0o644))
 
 	existingConfig := filepath.Join(targetDir, ".config")
-	require.NoError(t, os.MkdirAll(existingConfig, 0755))
+	require.NoError(t, os.MkdirAll(existingConfig, 0o755))
 	require.NoError(t, os.Symlink(starshipSrc, filepath.Join(existingConfig, "starship.toml")))
 
 	cfg := createCheckConfig(t, sourceDir, targetDir)
@@ -749,20 +750,20 @@ func TestCheck_MixedStatesInDirectory(t *testing.T) {
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	configSrc := filepath.Join(sourceDir, "config")
-	require.NoError(t, os.MkdirAll(configSrc, 0755))
+	require.NoError(t, os.MkdirAll(configSrc, 0o755))
 
 	starshipSrc := filepath.Join(configSrc, "starship.toml")
-	require.NoError(t, os.WriteFile(starshipSrc, []byte("starship"), 0644))
+	require.NoError(t, os.WriteFile(starshipSrc, []byte("starship"), 0o644))
 
 	alacrittySrc := filepath.Join(configSrc, "alacritty.toml")
-	require.NoError(t, os.WriteFile(alacrittySrc, []byte("alacritty"), 0644))
+	require.NoError(t, os.WriteFile(alacrittySrc, []byte("alacritty"), 0o644))
 
 	configTarget := filepath.Join(targetDir, ".config")
-	require.NoError(t, os.MkdirAll(configTarget, 0755))
+	require.NoError(t, os.MkdirAll(configTarget, 0o755))
 	require.NoError(t, os.Symlink(starshipSrc, filepath.Join(configTarget, "starship.toml")))
 	// alacritty not linked
 
@@ -788,13 +789,13 @@ func TestCheck_ParentSymlinkedShowsFiles(t *testing.T) {
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	configSrc := filepath.Join(sourceDir, "config")
-	require.NoError(t, os.MkdirAll(configSrc, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(configSrc, "starship.toml"), []byte("starship"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(configSrc, "alacritty.toml"), []byte("alacritty"), 0644))
+	require.NoError(t, os.MkdirAll(configSrc, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(configSrc, "starship.toml"), []byte("starship"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(configSrc, "alacritty.toml"), []byte("alacritty"), 0o644))
 
 	// Symlink entire .config to source config
 	require.NoError(t, os.Symlink(configSrc, filepath.Join(targetDir, ".config")))
@@ -821,11 +822,11 @@ func TestCheck_SetsNameAndTarget(t *testing.T) {
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
 	targetDir := filepath.Join(tmpDir, "home")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	cfg := createCheckConfig(t, sourceDir, targetDir)
 	linker := New(cfg)
@@ -845,11 +846,11 @@ func TestLink_SetsName(t *testing.T) {
 	targetDir := filepath.Join(tmpDir, "home")
 	backupDir := filepath.Join(tmpDir, "backup")
 
-	require.NoError(t, os.MkdirAll(sourceDir, 0755))
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	vimrc := filepath.Join(sourceDir, "vimrc")
-	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0644))
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
 
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)

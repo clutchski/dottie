@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,8 +16,10 @@ import (
 	"github.com/clutchski/dottie/internal/util"
 )
 
-const defaultAPIURL = "https://api.github.com/repos/clutchski/dottie/releases/latest"
-const defaultDownloadURL = "https://github.com/clutchski/dottie/releases/download"
+const (
+	defaultAPIURL      = "https://api.github.com/repos/clutchski/dottie/releases/latest"
+	defaultDownloadURL = "https://github.com/clutchski/dottie/releases/download"
+)
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
@@ -65,10 +68,12 @@ func extractBinary(r io.Reader, w io.Writer) error {
 	}
 	defer gr.Close()
 
+	const maxBinarySize = 100 << 20 // 100 MB
+
 	tr := tar.NewReader(gr)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return fmt.Errorf("dottie binary not found in tarball")
 		}
 		if err != nil {
@@ -77,7 +82,7 @@ func extractBinary(r io.Reader, w io.Writer) error {
 		if filepath.Base(hdr.Name) != "dottie" {
 			continue
 		}
-		_, err = io.Copy(w, tr)
+		_, err = io.Copy(w, io.LimitReader(tr, maxBinarySize))
 		return err
 	}
 }

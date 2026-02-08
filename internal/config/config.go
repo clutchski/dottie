@@ -51,7 +51,10 @@ func IsDottieDir(dir string) bool {
 // Load loads the configuration from the given directory.
 // If no config file exists, returns a default configuration.
 func Load(dir string) (*Config, error) {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
 
 	cfg := &Config{
 		// Set defaults
@@ -66,23 +69,23 @@ func Load(dir string) (*Config, error) {
 
 	// Try each config file name
 	var data []byte
-	var err error
+	var readErr error
 	var foundName string
 	for _, name := range ConfigFileNames {
 		configPath := filepath.Join(dir, name)
-		data, err = os.ReadFile(configPath)
-		if err == nil {
+		data, readErr = os.ReadFile(configPath)
+		if readErr == nil {
 			foundName = name
 			break
 		}
 	}
-	if err != nil {
-		if os.IsNotExist(err) {
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
 			// No config file - use defaults
 			cfg.configFile = "defaults"
 			return cfg, nil
 		}
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("failed to read config file: %w", readErr)
 	}
 
 	cfg.configFile = foundName
@@ -98,7 +101,6 @@ func Load(dir string) (*Config, error) {
 		cfg.SourceDir = "."
 	}
 	if cfg.TargetDir == "" {
-		home, _ := os.UserHomeDir()
 		cfg.TargetDir = home
 	}
 	if cfg.BackupDir == "" {

@@ -92,18 +92,23 @@ func cmdInit(args []string) int {
 		return fatal(err)
 	}
 
-	absDir, _ := filepath.Abs(dir)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return fatal(err)
+	}
 	fmt.Printf("Initialized dotfiles repository at %s\n", absDir)
 
 	return 0
 }
 
 func cmdRun(args []string) int {
-	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
 	force := fs.Bool("f", false, "force")
 	verbose := fs.Bool("v", false, "verbose")
-	_ = fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return fatal(err)
+	}
 
 	p := console.New(*verbose)
 
@@ -151,7 +156,7 @@ func cmdHooks(args []string) int {
 
 	switch args[0] {
 	case "list":
-		return cmdHooksList(args[1:])
+		return cmdHooksList()
 	case "run":
 		return cmdHooksRun(args[1:])
 	default:
@@ -174,7 +179,7 @@ Examples:
   dottie hooks run status`)
 }
 
-func cmdHooksList(args []string) int {
+func cmdHooksList() int {
 	cfg, err := loadConfig()
 	if err != nil {
 		return fatal(err)
@@ -201,9 +206,11 @@ func cmdHooksList(args []string) int {
 }
 
 func cmdHooksRun(args []string) int {
-	fs := flag.NewFlagSet("hooks run", flag.ExitOnError)
+	fs := flag.NewFlagSet("hooks run", flag.ContinueOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
-	_ = fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return fatal(err)
+	}
 
 	if fs.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "Error: phase argument required (pre-link, post-link, status)")
@@ -232,8 +239,10 @@ func cmdHooksRun(args []string) int {
 }
 
 func cmdStatus(args []string) int {
-	fs := flag.NewFlagSet("status", flag.ExitOnError)
-	_ = fs.Parse(args)
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return fatal(err)
+	}
 
 	p := console.New(true)
 
@@ -285,7 +294,10 @@ func cmdStatus(args []string) int {
 	}
 
 	// Show dottie info
-	binary, _ := os.Executable()
+	binary, err := os.Executable()
+	if err != nil {
+		binary = "unknown"
+	}
 	configPath := filepath.Join(cfg.RepoRoot(), cfg.File())
 	select {
 	case vr := <-versionChan:
@@ -306,7 +318,10 @@ func cmdStatus(args []string) int {
 
 // formatTargetPath replaces the home directory prefix with ~ for display.
 func formatTargetPath(cfg *config.Config, path string) string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
 	if cfg.TargetDir == home && strings.HasPrefix(path, home) {
 		return "~" + strings.TrimPrefix(path, home)
 	}
@@ -333,7 +348,10 @@ func runHooksPhase(runner *hooks.Runner, p *console.Printer, phase string, dryRu
 }
 
 func newHookRunner(cfg *config.Config) *hooks.Runner {
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
 	return hooks.New(cfg.GetHooksPath(), hooks.EnvVars{
 		"DOTTIE_ROOT": cwd,
 		"DOTTIE_HOME": cfg.GetTargetDir(),
