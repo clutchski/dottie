@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +15,6 @@ import (
 
 // EnvVars holds environment variables passed to hook scripts.
 type EnvVars map[string]string
-
 
 // Runner executes hook scripts.
 type Runner struct {
@@ -83,7 +83,8 @@ func (r *Runner) runHook(path, phase string, dryRun bool) HookResult {
 	err := cmd.Run()
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1
@@ -200,7 +201,8 @@ func (r *Runner) runStatusScript(path string) int {
 
 	err := cmd.Run()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode()
 		}
 		return 1
@@ -225,7 +227,7 @@ func isExecutable(path string) bool {
 	if err != nil {
 		return false
 	}
-	return info.Mode()&0111 != 0
+	return info.Mode()&0o111 != 0
 }
 
 func boolToString(b bool) string {

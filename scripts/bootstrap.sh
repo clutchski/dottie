@@ -8,13 +8,8 @@ if [ -z "$DOTFILES_REPO" ]; then
 fi
 
 DOTFILES_DIR="${DOTFILES_DIR:-$HOME/.dotfiles}"
-if [ -z "$INSTALL_DIR" ]; then
-    if [ -d "$HOME/.local/bin" ]; then
-        INSTALL_DIR="$HOME/.local/bin"
-    else
-        INSTALL_DIR="/usr/local/bin"
-    fi
-fi
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+mkdir -p "$INSTALL_DIR"
 DOTTIE_REPO="clutchski/dottie"
 
 echo ""
@@ -69,11 +64,7 @@ if ! curl -fsSL "$URL" | tar xz -C "$TMP_DIR"; then
     exit 1
 fi
 
-if [ -w "$INSTALL_DIR" ]; then
-    mv "$TMP_DIR/dottie" "$INSTALL_DIR/dottie"
-else
-    sudo mv "$TMP_DIR/dottie" "$INSTALL_DIR/dottie"
-fi
+mv "$TMP_DIR/dottie" "$INSTALL_DIR/dottie"
 
 # Run dottie
 cd "$DOTFILES_DIR"

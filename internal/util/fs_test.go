@@ -10,7 +10,7 @@ func TestFileExists(t *testing.T) {
 	// Create a temporary file
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "testfile")
-	if err := os.WriteFile(tmpFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte("test"), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
@@ -38,7 +38,7 @@ func TestIsSymlink(t *testing.T) {
 
 	// Create a regular file
 	regularFile := filepath.Join(tmpDir, "regular")
-	if err := os.WriteFile(regularFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(regularFile, []byte("test"), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestSymlinkTarget(t *testing.T) {
 
 	// Create a regular file
 	regularFile := filepath.Join(tmpDir, "regular")
-	if err := os.WriteFile(regularFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(regularFile, []byte("test"), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
@@ -154,7 +154,7 @@ func TestBackupFile(t *testing.T) {
 	// Create a file to backup
 	originalFile := filepath.Join(tmpDir, "original.txt")
 	content := []byte("original content")
-	if err := os.WriteFile(originalFile, content, 0644); err != nil {
+	if err := os.WriteFile(originalFile, content, 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
@@ -184,7 +184,7 @@ func TestBackupFile_Symlink(t *testing.T) {
 
 	// Create a target file and a symlink to it
 	targetFile := filepath.Join(tmpDir, "target.txt")
-	if err := os.WriteFile(targetFile, []byte("target content"), 0644); err != nil {
+	if err := os.WriteFile(targetFile, []byte("target content"), 0o644); err != nil {
 		t.Fatalf("Failed to create target file: %v", err)
 	}
 
@@ -225,19 +225,19 @@ func TestBackupFile_Directory(t *testing.T) {
 
 	// Create a directory with files and a symlink inside
 	sourceDir := filepath.Join(tmpDir, "mydir")
-	if err := os.MkdirAll(sourceDir, 0755); err != nil {
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
 		t.Fatalf("Failed to create source dir: %v", err)
 	}
 
 	// Create a regular file inside the directory
 	fileInDir := filepath.Join(sourceDir, "file.txt")
-	if err := os.WriteFile(fileInDir, []byte("file content"), 0644); err != nil {
+	if err := os.WriteFile(fileInDir, []byte("file content"), 0o644); err != nil {
 		t.Fatalf("Failed to create file in dir: %v", err)
 	}
 
 	// Create a symlink inside the directory
 	linkTarget := filepath.Join(tmpDir, "external.txt")
-	if err := os.WriteFile(linkTarget, []byte("external"), 0644); err != nil {
+	if err := os.WriteFile(linkTarget, []byte("external"), 0o644); err != nil {
 		t.Fatalf("Failed to create external file: %v", err)
 	}
 	linkInDir := filepath.Join(sourceDir, "link")

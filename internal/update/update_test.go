@@ -50,7 +50,7 @@ func TestExtractBinaryMissing(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := extractBinary(bytes.NewReader(tarball), &buf)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dottie binary not found")
 }
 
@@ -86,7 +86,7 @@ func TestDownloadAndInstall(t *testing.T) {
 	tarball := createTarGz(t, "dottie", []byte("fake-binary"))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(tarball)
+		w.Write(tarball)
 	}))
 	defer srv.Close()
 
@@ -145,7 +145,7 @@ func TestInstallFromProceedsWhenOutdated(t *testing.T) {
 			fmt.Fprintln(w, `{"tag_name": "v2.0.0"}`)
 			return
 		}
-		_, _ = w.Write(tarball)
+		w.Write(tarball)
 	}))
 	defer srv.Close()
 
@@ -169,7 +169,7 @@ func TestInstallFromSkipsCheckForDevVersion(t *testing.T) {
 			fmt.Fprintln(w, `{"tag_name": "v9.9.9"}`)
 			return
 		}
-		_, _ = w.Write(tarball)
+		w.Write(tarball)
 	}))
 	defer srv.Close()
 

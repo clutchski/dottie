@@ -92,7 +92,16 @@ func (l *linker) Check() ([]Result, error) {
 	sourceDir := l.cfg.GetSourcePath()
 	var results []Result
 	for _, source := range sources {
-		relPath, _ := filepath.Rel(sourceDir, source)
+		relPath, err := filepath.Rel(sourceDir, source)
+		if err != nil {
+			results = append(results, Result{
+				Source:  source,
+				Status:  StatusError,
+				Error:   fmt.Errorf("failed to compute relative path: %w", err),
+				Message: err.Error(),
+			})
+			continue
+		}
 		target := l.computeTargetPath(relPath)
 		r := l.checkFile(source, target)
 		r.Name = relPath
@@ -134,7 +143,12 @@ func (l *linker) checkFile(source, target string) Result {
 
 	// Not linked - check if it's a symlink pointing elsewhere or a regular file
 	if util.IsSymlink(target) {
-		linkTarget, _ := util.SymlinkTarget(target)
+		linkTarget, err := util.SymlinkTarget(target)
+		if err != nil {
+			r.Status = StatusError
+			r.Message = fmt.Sprintf("cannot read symlink: %v", err)
+			return r
+		}
 		r.Status = StatusDiff
 		r.Message = fmt.Sprintf("symlink points to %s", linkTarget)
 	} else {
@@ -217,7 +231,7 @@ func (l *linker) makeDirs(dirs []string) error {
 				return fmt.Errorf("failed to remove symlink %s: %w", dir, err)
 			}
 		}
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 	}
@@ -230,7 +244,16 @@ func (l *linker) createLinks(sources []string, dryRun, force bool) []Result {
 	var results []Result
 
 	for _, source := range sources {
-		relPath, _ := filepath.Rel(sourceDir, source)
+		relPath, err := filepath.Rel(sourceDir, source)
+		if err != nil {
+			results = append(results, Result{
+				Source:  source,
+				Status:  StatusError,
+				Error:   fmt.Errorf("failed to compute relative path: %w", err),
+				Message: err.Error(),
+			})
+			continue
+		}
 		target := l.computeTargetPath(relPath)
 		r := l.linkFile(source, target, dryRun, force)
 		r.Name = relPath

@@ -56,7 +56,7 @@ func ExpandPath(path string) (string, error) {
 
 // EnsureDir creates a directory and all parent directories if they don't exist.
 func EnsureDir(path string) error {
-	return os.MkdirAll(path, 0755)
+	return os.MkdirAll(path, 0o755)
 }
 
 // BackupFile copies a file, symlink, or directory to the backup directory with a timestamp.

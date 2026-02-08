@@ -1,6 +1,7 @@
 package init
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -75,11 +76,11 @@ func TestInit_CreatesExampleHooks(t *testing.T) {
 	// Check example hooks are executable
 	hookInfo, err := os.Stat(filepath.Join(targetDir, "hooks", "hook.example.sh"))
 	require.NoError(t, err)
-	assert.True(t, hookInfo.Mode()&0111 != 0, "hook.example.sh should be executable")
+	assert.NotEqual(t, fs.FileMode(0), hookInfo.Mode()&0o111, "hook.example.sh should be executable")
 
 	brewInfo, err := os.Stat(filepath.Join(targetDir, "hooks", "homebrew.example.sh"))
 	require.NoError(t, err)
-	assert.True(t, brewInfo.Mode()&0111 != 0, "homebrew.example.sh should be executable")
+	assert.NotEqual(t, fs.FileMode(0), brewInfo.Mode()&0o111, "homebrew.example.sh should be executable")
 }
 
 func TestInit_CreatesExampleFiles(t *testing.T) {
@@ -139,18 +140,18 @@ func TestInit_CreatesBootstrapScript(t *testing.T) {
 	// Check bootstrap.sh is executable
 	info, err := os.Stat(bootstrapPath)
 	require.NoError(t, err)
-	assert.True(t, info.Mode()&0111 != 0, "bootstrap.sh should be executable")
+	assert.NotEqual(t, fs.FileMode(0), info.Mode()&0o111, "bootstrap.sh should be executable")
 }
 
 func TestInit_FailsIfExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "dotfiles")
 
-	require.NoError(t, os.MkdirAll(targetDir, 0755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
 
 	// Create dottie.yaml to simulate existing repo
 	configPath := filepath.Join(targetDir, "dottie.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(""), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(""), 0o644))
 
 	err := Init(targetDir)
 	assert.Error(t, err, "should fail if dottie.yaml already exists")
@@ -162,7 +163,7 @@ func TestInit_WorksWithCurrentDir(t *testing.T) {
 	oldDir, err := os.Getwd()
 	require.NoError(t, err)
 	defer func() {
-		_ = os.Chdir(oldDir)
+		require.NoError(t, os.Chdir(oldDir))
 	}()
 
 	require.NoError(t, os.Chdir(tmpDir))

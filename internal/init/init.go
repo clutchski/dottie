@@ -165,61 +165,61 @@ func Init(dir string) error {
 	}
 
 	// Create main directory
-	if err := os.MkdirAll(absDir, 0755); err != nil {
+	if err := os.MkdirAll(absDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Create dottie.yaml
-	if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(defaultConfig), 0o644); err != nil {
 		return fmt.Errorf("failed to create config file: %w", err)
 	}
 
 	// Create home directory with examples
 	homePath := filepath.Join(absDir, "home")
-	if err := os.MkdirAll(homePath, 0755); err != nil {
+	if err := os.MkdirAll(homePath, 0o755); err != nil {
 		return fmt.Errorf("failed to create home directory: %w", err)
 	}
 
 	shellrcPath := filepath.Join(homePath, "shellrc")
-	if err := os.WriteFile(shellrcPath, []byte(exampleShellrc), 0644); err != nil {
+	if err := os.WriteFile(shellrcPath, []byte(exampleShellrc), 0o644); err != nil {
 		return fmt.Errorf("failed to create example shellrc: %w", err)
 	}
 
 	editorrcPath := filepath.Join(homePath, "editorrc")
-	if err := os.WriteFile(editorrcPath, []byte(exampleEditorrc), 0644); err != nil {
+	if err := os.WriteFile(editorrcPath, []byte(exampleEditorrc), 0o644); err != nil {
 		return fmt.Errorf("failed to create example editorrc: %w", err)
 	}
 
 	// Create config directory with example (demonstrates linking into existing directories)
 	homeConfigPath := filepath.Join(homePath, "config")
-	if err := os.MkdirAll(homeConfigPath, 0755); err != nil {
+	if err := os.MkdirAll(homeConfigPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
 	starshipPath := filepath.Join(homeConfigPath, "starship.toml")
-	if err := os.WriteFile(starshipPath, []byte(exampleStarship), 0644); err != nil {
+	if err := os.WriteFile(starshipPath, []byte(exampleStarship), 0o644); err != nil {
 		return fmt.Errorf("failed to create example starship.toml: %w", err)
 	}
 
 	// Create hooks directory with example hooks
 	hooksPath := filepath.Join(absDir, "hooks")
-	if err := os.MkdirAll(hooksPath, 0755); err != nil {
+	if err := os.MkdirAll(hooksPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
 	hookExamplePath := filepath.Join(hooksPath, "hook.example.sh")
-	if err := os.WriteFile(hookExamplePath, []byte(hookExampleTemplate), 0755); err != nil {
+	if err := os.WriteFile(hookExamplePath, []byte(hookExampleTemplate), 0o755); err != nil {
 		return fmt.Errorf("failed to create hook.example.sh: %w", err)
 	}
 
 	homebrewExamplePath := filepath.Join(hooksPath, "homebrew.example.sh")
-	if err := os.WriteFile(homebrewExamplePath, []byte(homebrewExampleTemplate), 0755); err != nil {
+	if err := os.WriteFile(homebrewExamplePath, []byte(homebrewExampleTemplate), 0o755); err != nil {
 		return fmt.Errorf("failed to create homebrew.example.sh: %w", err)
 	}
 
 	// Create scripts directory with bootstrap.sh
 	scriptsPath := filepath.Join(absDir, "scripts")
-	if err := os.MkdirAll(scriptsPath, 0755); err != nil {
+	if err := os.MkdirAll(scriptsPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create scripts directory: %w", err)
 	}
 
@@ -231,7 +231,7 @@ func Init(dir string) error {
 
 	bootstrap := fmt.Sprintf(bootstrapScript, repoURL)
 	bootstrapPath := filepath.Join(scriptsPath, "bootstrap.sh")
-	if err := os.WriteFile(bootstrapPath, []byte(bootstrap), 0755); err != nil {
+	if err := os.WriteFile(bootstrapPath, []byte(bootstrap), 0o755); err != nil {
 		return fmt.Errorf("failed to create bootstrap.sh: %w", err)
 	}
 
@@ -239,7 +239,7 @@ func Init(dir string) error {
 	rawURL := strings.Replace(repoURL, "github.com", "raw.githubusercontent.com", 1)
 	readme := fmt.Sprintf(readmeTemplate, repoName, rawURL)
 	readmePath := filepath.Join(absDir, "README.md")
-	if err := os.WriteFile(readmePath, []byte(readme), 0644); err != nil {
+	if err := os.WriteFile(readmePath, []byte(readme), 0o644); err != nil {
 		return fmt.Errorf("failed to create README.md: %w", err)
 	}
 
