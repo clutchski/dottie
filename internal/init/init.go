@@ -58,7 +58,7 @@ const hookExampleTemplate = `#!/bin/bash
 # Phases:
 #   pre-link  - runs before symlinking (install dependencies here)
 #   post-link - runs after symlinking (configure tools here)
-#   status    - exit 0 if ok, exit 1 if needs update
+#   status    - exit 0 if ok, exit 1 if needs update, exit 2+ if failed
 
 case "$1" in
     pre-link)
@@ -99,10 +99,10 @@ case "$1" in
         fi
         ;;
     status)
-        # Fail if brew not installed
-        command -v brew &>/dev/null || exit 1
+        # exit 2 = failed (brew not installed)
+        command -v brew &>/dev/null || exit 2
 
-        # Check if all packages are installed
+        # exit 1 = needs update (packages missing), exit 0 = ok
         if [[ -f "$BREWFILE" ]]; then
             brew bundle check --file="$BREWFILE" &>/dev/null
             exit $?
