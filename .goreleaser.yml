@@ -17,6 +17,9 @@ builds:
     goarch:
       - amd64
       - arm64
+    hooks:
+      post:
+        - cmd: sh -c 'case "{{ .Target }}" in darwin_*) codesign --sign - --force "{{ .Path }}" ;; esac'
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
