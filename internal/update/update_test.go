@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -55,6 +57,10 @@ func TestExtractBinaryMissing(t *testing.T) {
 }
 
 func TestAtomicReplace(t *testing.T) {
+	old := codesignFunc
+	codesignFunc = func(path string) error { return nil }
+	defer func() { codesignFunc = old }()
+
 	tmpDir := t.TempDir()
 	src := filepath.Join(tmpDir, "new")
 	require.NoError(t, os.WriteFile(src, []byte("new-binary"), 0o644))
@@ -83,6 +89,10 @@ func fileExists(path string) bool {
 }
 
 func TestDownloadAndInstall(t *testing.T) {
+	old := codesignFunc
+	codesignFunc = func(path string) error { return nil }
+	defer func() { codesignFunc = old }()
+
 	tarball := createTarGz(t, "dottie", []byte("fake-binary"))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +148,10 @@ func TestInstallFromSkipsWhenUpToDateWithoutPrefix(t *testing.T) {
 }
 
 func TestInstallFromProceedsWhenOutdated(t *testing.T) {
+	old := codesignFunc
+	codesignFunc = func(path string) error { return nil }
+	defer func() { codesignFunc = old }()
+
 	tarball := createTarGz(t, "dottie", []byte("new-binary"))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -162,6 +176,10 @@ func TestInstallFromProceedsWhenOutdated(t *testing.T) {
 }
 
 func TestInstallFromSkipsCheckForDevVersion(t *testing.T) {
+	old := codesignFunc
+	codesignFunc = func(path string) error { return nil }
+	defer func() { codesignFunc = old }()
+
 	tarball := createTarGz(t, "dottie", []byte("dev-binary"))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -207,4 +225,51 @@ func TestGetVersionFromOutdated(t *testing.T) {
 	require.NoError(t, result.Err)
 	assert.Equal(t, "v2.0.0", result.Latest)
 	assert.False(t, result.UpToDate)
+}
+
+func TestCodesignBinary(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("codesign only available on macOS")
+	}
+
+	// Build a real Mach-O binary to sign.
+	tmpDir := t.TempDir()
+	src := filepath.Join(tmpDir, "main.go")
+	require.NoError(t, os.WriteFile(src, []byte("package main\nfunc main() {}\n"), 0o644))
+
+	bin := filepath.Join(tmpDir, "testbin")
+	cmd := exec.Command("go", "build", "-o", bin, src)
+	require.NoError(t, cmd.Run())
+
+	// Strip the existing ad-hoc signature so we can verify codesignBinary adds one.
+	strip := exec.Command("codesign", "--remove-signature", bin)
+	require.NoError(t, strip.Run())
+
+	err := codesignBinary(bin)
+	require.NoError(t, err)
+
+	// Verify the binary is now signed.
+	verify := exec.Command("codesign", "--verify", bin)
+	assert.NoError(t, verify.Run())
+}
+
+func TestAtomicReplaceCallsCodesign(t *testing.T) {
+	called := false
+	old := codesignFunc
+	codesignFunc = func(path string) error {
+		called = true
+		return nil
+	}
+	defer func() { codesignFunc = old }()
+
+	tmpDir := t.TempDir()
+	src := filepath.Join(tmpDir, "new")
+	require.NoError(t, os.WriteFile(src, []byte("binary"), 0o644))
+
+	dest := filepath.Join(tmpDir, "dottie")
+	require.NoError(t, os.WriteFile(dest, []byte("old"), 0o755))
+
+	err := atomicReplace(src, dest)
+	require.NoError(t, err)
+	assert.True(t, called, "codesignFunc should be called during atomicReplace")
 }
