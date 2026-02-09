@@ -103,10 +103,17 @@ func (r *Runner) runHook(path, phase string, dryRun bool) HookResult {
 type HookStatus struct {
 	Name     string
 	ExitCode int
+	Output   string
 }
 
 // Ok returns true if the hook exited successfully.
 func (s HookStatus) Ok() bool { return s.ExitCode == 0 }
+
+// NeedsUpdate returns true if the hook exited with code 1 (needs update).
+func (s HookStatus) NeedsUpdate() bool { return s.ExitCode == 1 }
+
+// Failed returns true if the hook exited with code 2 or higher.
+func (s HookStatus) Failed() bool { return s.ExitCode > 1 }
 
 // StatusResult holds the results of hook status checks.
 type StatusResult struct {
@@ -137,11 +144,7 @@ func (r *Runner) StartStatusCheck() <-chan StatusResult {
 			wg.Add(1)
 			go func(idx int, path string) {
 				defer wg.Done()
-				exitCode := r.runStatusScript(path)
-				statuses[idx] = HookStatus{
-					Name:     filepath.Base(path),
-					ExitCode: exitCode,
-				}
+				statuses[idx] = r.runStatusScript(path)
 			}(i, script)
 		}
 		wg.Wait()
@@ -194,20 +197,30 @@ func (r *Runner) List() ([]string, error) {
 	return scripts, nil
 }
 
-// runStatusScript runs a hook with "status" phase silently and returns the exit code.
-func (r *Runner) runStatusScript(path string) int {
+// runStatusScript runs a hook with "status" phase and returns a HookStatus
+// with the exit code and captured output.
+func (r *Runner) runStatusScript(path string) HookStatus {
 	cmd := exec.Command(path, "status")
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
 	cmd.Env = r.buildEnv("DOTTIE_DRY_RUN", "false")
 
-	err := cmd.Run()
-	if err != nil {
+	exitCode := 0
+	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return exitErr.ExitCode()
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
 		}
-		return 1
 	}
-	return 0
+
+	return HookStatus{
+		Name:     filepath.Base(path),
+		ExitCode: exitCode,
+		Output:   buf.String(),
+	}
 }
 
 // buildEnv returns os.Environ() plus the runner's env vars and any extra key=value pairs.

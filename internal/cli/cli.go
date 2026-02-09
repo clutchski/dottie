@@ -106,11 +106,12 @@ func cmdRun(args []string) int {
 	dryRun := fs.Bool("n", false, "dry-run")
 	force := fs.Bool("f", false, "force")
 	verbose := fs.Bool("v", false, "verbose")
+	veryVerbose := fs.Bool("vv", false, "show all output")
 	if err := fs.Parse(args); err != nil {
 		return fatal(err)
 	}
 
-	p := console.New(*verbose)
+	p := console.New(verbosity(*verbose, *veryVerbose))
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -208,6 +209,7 @@ func cmdHooksList() int {
 func cmdHooksRun(args []string) int {
 	fs := flag.NewFlagSet("hooks run", flag.ContinueOnError)
 	dryRun := fs.Bool("n", false, "dry-run")
+	veryVerbose := fs.Bool("vv", false, "show all output")
 	if err := fs.Parse(args); err != nil {
 		return fatal(err)
 	}
@@ -229,7 +231,7 @@ func cmdHooksRun(args []string) int {
 	}
 
 	hookRunner := newHookRunner(cfg)
-	p := console.New(true)
+	p := console.New(verbosity(true, *veryVerbose))
 
 	ok, total := runHooksPhase(hookRunner, p, phase, *dryRun)
 	if ok < total {
@@ -240,11 +242,13 @@ func cmdHooksRun(args []string) int {
 
 func cmdStatus(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	verbose := fs.Bool("v", false, "verbose")
+	veryVerbose := fs.Bool("vv", false, "show all output")
 	if err := fs.Parse(args); err != nil {
 		return fatal(err)
 	}
 
-	p := console.New(true)
+	p := console.New(verbosity(*verbose, *veryVerbose))
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -265,13 +269,20 @@ func cmdStatus(args []string) int {
 		return fatal(err)
 	}
 
-	allOk := true
+	var lc console.LinkCounts
 	p.Header("links")
 	for _, r := range results {
 		r.Target = formatTargetPath(cfg, r.Target)
 		p.PrintLink(r)
-		if r.Status != link.StatusLinked {
-			allOk = false
+		switch r.Status {
+		case link.StatusLinked:
+			lc.Ok++
+		case link.StatusMissing:
+			lc.Missing++
+		case link.StatusDiff:
+			lc.Diff++
+		case link.StatusError:
+			lc.Error++
 		}
 	}
 
@@ -282,34 +293,48 @@ func cmdStatus(args []string) int {
 		return 1
 	}
 
-	hooksOk := true
+	var hc console.HookCounts
 	if len(hookResult.Hooks) > 0 {
 		p.Header("hooks")
 		for _, h := range hookResult.Hooks {
 			p.PrintHookStatus(h)
-			if !h.Ok() {
-				hooksOk = false
+			if h.Ok() {
+				hc.Ok++
+			} else if h.NeedsUpdate() {
+				hc.Update++
+			} else {
+				hc.Err++
 			}
 		}
 	}
 
-	// Show dottie info
-	binary, err := os.Executable()
-	if err != nil {
-		binary = "unknown"
-	}
-	configPath := filepath.Join(cfg.RepoRoot(), cfg.File())
+	// Get version info
+	var latest string
+	upToDate := true
 	select {
 	case vr := <-versionChan:
 		if vr.Err == nil {
-			p.PrintDottieStatus(binary, configPath, version, vr.Latest, vr.UpToDate)
-		} else {
-			p.PrintDottieStatus(binary, configPath, version, "", true)
+			latest = vr.Latest
+			upToDate = vr.UpToDate
 		}
 	case <-time.After(2 * time.Second):
-		p.PrintDottieStatus(binary, configPath, version, "", true)
 	}
 
+	if p.Verbosity() >= console.Verbose {
+		// Verbose/Everything: show dottie info section
+		binary, err := os.Executable()
+		if err != nil {
+			binary = "unknown"
+		}
+		configPath := filepath.Join(cfg.RepoRoot(), cfg.File())
+		p.PrintDottieStatus(binary, configPath, version, latest, upToDate)
+	} else {
+		// Quiet: compact summary
+		p.StatusSummary(lc, hc, version, latest, upToDate)
+	}
+
+	allOk := lc.Missing == 0 && lc.Diff == 0 && lc.Error == 0
+	hooksOk := hc.Err == 0
 	if !allOk || !hooksOk {
 		return 1
 	}
@@ -356,6 +381,16 @@ func newHookRunner(cfg *config.Config) *hooks.Runner {
 		"DOTTIE_ROOT": cwd,
 		"DOTTIE_HOME": cfg.GetTargetDir(),
 	})
+}
+
+func verbosity(v, vv bool) console.Verbosity {
+	if vv {
+		return console.Everything
+	}
+	if v {
+		return console.Verbose
+	}
+	return console.Quiet
 }
 
 func fatal(err error) int {

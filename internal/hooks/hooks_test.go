@@ -326,6 +326,46 @@ func TestStartStatusCheck_MissingDirectory(t *testing.T) {
 	assert.Empty(t, result.Hooks)
 }
 
+func TestStartStatusCheck_CapturesOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "brew.sh"), []byte(`#!/bin/bash
+echo "outdated packages"
+echo "warning: something" >&2
+exit 1`), 0o755))
+
+	runner := New(hooksDir, NoEnv)
+	result := <-runner.StartStatusCheck()
+	require.NoError(t, result.Err)
+	require.Len(t, result.Hooks, 1)
+	assert.Equal(t, 1, result.Hooks[0].ExitCode)
+	assert.Contains(t, result.Hooks[0].Output, "outdated packages")
+	assert.Contains(t, result.Hooks[0].Output, "warning: something")
+}
+
+func TestHookStatus_NeedsUpdate(t *testing.T) {
+	s := HookStatus{Name: "brew", ExitCode: 1}
+	assert.True(t, s.NeedsUpdate())
+	assert.False(t, s.Ok())
+	assert.False(t, s.Failed())
+}
+
+func TestHookStatus_Failed(t *testing.T) {
+	s := HookStatus{Name: "brew", ExitCode: 2}
+	assert.False(t, s.NeedsUpdate())
+	assert.False(t, s.Ok())
+	assert.True(t, s.Failed())
+}
+
+func TestHookStatus_Ok(t *testing.T) {
+	s := HookStatus{Name: "brew", ExitCode: 0}
+	assert.False(t, s.NeedsUpdate())
+	assert.True(t, s.Ok())
+	assert.False(t, s.Failed())
+}
+
 func TestDisplayName(t *testing.T) {
 	tests := []struct {
 		input string

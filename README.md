@@ -79,7 +79,9 @@ dottie init              # current directory
 Run hooks and create symlinks from your dotfiles repo to your home directory. Runs pre-link hooks, creates symlinks, then runs post-link hooks.
 
 ```bash
-dottie run
+dottie run             # quiet mode (failures only)
+dottie run -v          # verbose (show all results)
+dottie run -vv         # show all results + hook output
 ```
 
 ### `dottie hooks list`
@@ -95,10 +97,11 @@ dottie hooks list
 Run hooks for a specific phase without linking.
 
 ```bash
-dottie hooks run pre-link   # run pre-link hooks only
-dottie hooks run post-link  # run post-link hooks only
-dottie hooks run status     # run status hooks only
+dottie hooks run pre-link     # run pre-link hooks only
+dottie hooks run post-link    # run post-link hooks only
+dottie hooks run status       # run status hooks only
 dottie hooks run pre-link -n  # dry-run
+dottie hooks run status -vv   # show hook output
 ```
 
 ### `dottie status`
@@ -106,7 +109,8 @@ dottie hooks run pre-link -n  # dry-run
 Show the status of your dotfiles (linked, missing, conflicts), then runs status hooks.
 
 ```bash
-dottie status
+dottie status          # show status
+dottie status -vv      # show status + hook output
 ```
 
 ## Configuration
@@ -150,7 +154,10 @@ Hooks are executable scripts in the `hooks/` directory. Each script receives the
 **Phases:**
 - `pre-link` - runs before symlinking (install packages here)
 - `post-link` - runs after symlinking (source configs, run setup)
-- `status` - exit 0 if ok, exit non-zero if needs update
+- `status` - health checks with 3-state exit codes:
+  - exit 0 = ok
+  - exit 1 = needs update (shown as warning, not a failure)
+  - exit 2+ = failed
 
 **Example hook:**
 
