@@ -26,12 +26,16 @@ const (
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 // fetchLatestVersion queries the GitHub API for the latest release tag.
-func fetchLatestVersion(apiURL string) (string, error) {
+func fetchLatestVersion(apiURL string) (tag string, err error) {
 	resp, err := httpClient.Get(apiURL)
 	if err != nil {
 		return "", fmt.Errorf("fetching latest version: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); err == nil {
+			err = cerr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("fetching latest version: status %d", resp.StatusCode)
@@ -63,12 +67,16 @@ func capitalizeOS(os string) string {
 }
 
 // extractBinary reads a tar.gz stream and writes the "dottie" entry to w.
-func extractBinary(r io.Reader, w io.Writer) error {
+func extractBinary(r io.Reader, w io.Writer) (err error) {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("decompressing release: %w", err)
 	}
-	defer gr.Close()
+	defer func() {
+		if cerr := gr.Close(); err == nil {
+			err = cerr
+		}
+	}()
 
 	const maxBinarySize = 100 << 20 // 100 MB
 
@@ -107,18 +115,24 @@ var codesignFunc = codesignBinary
 
 // atomicReplace sets srcPath executable, codesigns it on macOS, and renames it over destPath.
 func atomicReplace(srcPath, destPath string) error {
+	cleanup := func() {
+		if err := os.Remove(srcPath); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "warning: failed to clean up %s: %v\n", srcPath, err)
+		}
+	}
+
 	if err := os.Chmod(srcPath, 0o755); err != nil {
-		os.Remove(srcPath)
+		cleanup()
 		return fmt.Errorf("setting permissions: %w", err)
 	}
 
 	if err := codesignFunc(srcPath); err != nil {
-		os.Remove(srcPath)
+		cleanup()
 		return err
 	}
 
 	if err := os.Rename(srcPath, destPath); err != nil {
-		os.Remove(srcPath)
+		cleanup()
 		return fmt.Errorf("replacing binary: %w", err)
 	}
 
@@ -126,12 +140,16 @@ func atomicReplace(srcPath, destPath string) error {
 }
 
 // downloadAndInstall downloads a tarball from url and installs the dottie binary to targetPath.
-func downloadAndInstall(url, targetPath string) error {
+func downloadAndInstall(url, targetPath string) (err error) {
 	resp, err := httpClient.Get(url)
 	if err != nil {
 		return fmt.Errorf("downloading release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); err == nil {
+			err = cerr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("downloading release: status %d", resp.StatusCode)
@@ -145,11 +163,17 @@ func downloadAndInstall(url, targetPath string) error {
 	tmpPath := tmp.Name()
 
 	if err := extractBinary(resp.Body, tmp); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		if cerr := tmp.Close(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to close temp file: %v\n", cerr)
+		}
+		if rerr := os.Remove(tmpPath); rerr != nil && !os.IsNotExist(rerr) {
+			fmt.Fprintf(os.Stderr, "warning: failed to clean up %s: %v\n", tmpPath, rerr)
+		}
 		return err
 	}
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing temp file: %w", err)
+	}
 
 	return atomicReplace(tmpPath, targetPath)
 }
