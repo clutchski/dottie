@@ -30,7 +30,7 @@ func TestPrintHook_OkVerbose(t *testing.T) {
 func TestPrintHook_OkQuiet(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
 	p.PrintHook(hooks.HookResult{Name: "homebrew", ExitCode: 0, Elapsed: 100 * time.Millisecond}, "pre-link")
-	assert.Equal(t, "", out.String())
+	assert.Empty(t, out.String())
 }
 
 func TestPrintHook_FailVerbose(t *testing.T) {
@@ -74,7 +74,7 @@ func TestPrintLink_WouldLink(t *testing.T) {
 func TestPrintLink_OkQuietSuppressed(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
 	p.PrintLink(link.Result{Name: "vimrc", Target: "~/.vimrc", Status: link.StatusLinked})
-	assert.Equal(t, "", out.String())
+	assert.Empty(t, out.String())
 }
 
 func TestPrintLink_Error(t *testing.T) {
@@ -102,6 +102,19 @@ func TestPrintLink_Diff(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
 	p.PrintLink(link.Result{Name: "vimrc", Status: link.StatusDiff, Message: "symlink points to /other"})
 	assert.Contains(t, out.String(), "  ✗ vimrc (symlink points to /other)")
+}
+
+func TestPrintLink_DanglingVerbose(t *testing.T) {
+	p, out, _ := newTestPrinter(Verbose)
+	p.Header("links")
+	p.PrintLink(link.Result{Name: ".vimrc", Status: link.StatusDangling})
+	assert.Contains(t, out.String(), "  ✗ .vimrc (orphan)")
+}
+
+func TestPrintLink_DanglingQuietSuppressed(t *testing.T) {
+	p, out, _ := newTestPrinter(Quiet)
+	p.PrintLink(link.Result{Name: ".vimrc", Status: link.StatusDangling})
+	assert.Empty(t, out.String())
 }
 
 // --- PrintHookStatus ---
@@ -185,7 +198,7 @@ func TestHeader_VerbosePrintsImmediately(t *testing.T) {
 func TestHeader_QuietStoresPending(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
 	p.Header("links")
-	assert.Equal(t, "", out.String())
+	assert.Empty(t, out.String())
 }
 
 func TestHeader_ReplacedByNewHeader(t *testing.T) {
@@ -206,28 +219,46 @@ func TestNoHeaderFlush_WhenNotSet(t *testing.T) {
 
 // --- Summary ---
 
-func TestSummary_AllOk(t *testing.T) {
+func TestSummary_AllUnchanged(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(3, 3, 30, 30, 2, 2)
-	assert.Equal(t, "✓ dottie · hooks:pre 3/3 · links 30/30 · hooks:post 2/2\n", out.String())
+	p.Summary(3, 3, LinkSummary{Existing: 30}, 2, 2)
+	assert.Equal(t, "✓ dottie · hooks:pre 3 · links 30 · hooks:post 2\n", out.String())
 }
 
-func TestSummary_Failures(t *testing.T) {
+func TestSummary_WithAdded(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(2, 3, 28, 30, 1, 2)
-	assert.Equal(t, "✗ dottie · hooks:pre 2/3 · links 28/30 · hooks:post 1/2\n", out.String())
+	p.Summary(3, 3, LinkSummary{Existing: 28, Added: 2}, 2, 2)
+	assert.Equal(t, "✓ dottie · hooks:pre 3 · links 28 +2 · hooks:post 2\n", out.String())
+}
+
+func TestSummary_WithPruned(t *testing.T) {
+	p, out, _ := newTestPrinter(Quiet)
+	p.Summary(3, 3, LinkSummary{Existing: 30, Pruned: 3}, 2, 2)
+	assert.Equal(t, "✓ dottie · hooks:pre 3 · links 30 -3 · hooks:post 2\n", out.String())
+}
+
+func TestSummary_WithAddedAndPruned(t *testing.T) {
+	p, out, _ := newTestPrinter(Quiet)
+	p.Summary(3, 3, LinkSummary{Existing: 35, Added: 3, Pruned: 2}, 2, 2)
+	assert.Equal(t, "✓ dottie · hooks:pre 3 · links 35 +3 -2 · hooks:post 2\n", out.String())
+}
+
+func TestSummary_WithErrors(t *testing.T) {
+	p, out, _ := newTestPrinter(Quiet)
+	p.Summary(2, 3, LinkSummary{Existing: 28, Errors: 2}, 1, 2)
+	assert.Equal(t, "✗ dottie · hooks:pre 2/3 · links 28 !2 · hooks:post 1/2\n", out.String())
 }
 
 func TestSummary_NoHooks(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(0, 0, 12, 12, 0, 0)
-	assert.Equal(t, "✓ dottie · links 12/12\n", out.String())
+	p.Summary(0, 0, LinkSummary{Existing: 12}, 0, 0)
+	assert.Equal(t, "✓ dottie · links 12\n", out.String())
 }
 
 func TestSummary_PreOnly(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(2, 2, 10, 10, 0, 0)
-	assert.Equal(t, "✓ dottie · hooks:pre 2/2 · links 10/10\n", out.String())
+	p.Summary(2, 2, LinkSummary{Existing: 10}, 0, 0)
+	assert.Equal(t, "✓ dottie · hooks:pre 2 · links 10\n", out.String())
 }
 
 // --- PrintDottieStatus ---
@@ -271,7 +302,7 @@ func TestStatusSummary_WithIssues(t *testing.T) {
 		"v1.2.3", "v1.3.0", false,
 	)
 	output := out.String()
-	assert.Equal(t, "links: ok:32 · missing:2 · diff:1\nhooks: ok:2 · update:3 · err:1\ndottie v1.2.3 (update available: v1.3.0)\n", output)
+	assert.Equal(t, "links: ok:32 · unlinked:2 · diff:1\nhooks: ok:2 · update:3 · err:1\ndottie v1.2.3 (update available: v1.3.0)\n", output)
 }
 
 func TestStatusSummary_NoHooks(t *testing.T) {
@@ -293,7 +324,18 @@ func TestStatusSummary_NoHooksUpdateAvailable(t *testing.T) {
 		"v1.2.3", "v1.3.0", false,
 	)
 	output := out.String()
-	assert.Equal(t, "links: ok:10 · missing:1\ndottie v1.2.3 (update available: v1.3.0)\n", output)
+	assert.Equal(t, "links: ok:10 · unlinked:1\ndottie v1.2.3 (update available: v1.3.0)\n", output)
+}
+
+func TestStatusSummary_WithDangling(t *testing.T) {
+	p, out, _ := newTestPrinter(Quiet)
+	p.StatusSummary(
+		LinkCounts{Ok: 34, Dangling: 2},
+		HookCounts{Ok: 5},
+		"v1.2.3", "", true,
+	)
+	output := out.String()
+	assert.Equal(t, "links: ok:34 · orphan:2\nhooks: ok:5\ndottie v1.2.3\n", output)
 }
 
 // --- Errorf ---

@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/clutchski/dottie/internal/config"
@@ -19,8 +20,9 @@ const (
 	StatusWouldLink
 	StatusAlreadyLinked
 	StatusError
-	StatusMissing // target doesn't exist
-	StatusDiff    // target exists but points elsewhere
+	StatusMissing  // target doesn't exist
+	StatusDiff     // target exists but points elsewhere
+	StatusDangling // symlink target no longer exists
 )
 
 func (s Status) String() string {
@@ -37,6 +39,8 @@ func (s Status) String() string {
 		return "missing"
 	case StatusDiff:
 		return "diff"
+	case StatusDangling:
+		return "dangling"
 	default:
 		return "unknown"
 	}
@@ -79,7 +83,44 @@ func (l *linker) Link(dryRun, force bool) ([]Result, error) {
 		}
 	}
 
-	return l.createLinks(sources, dryRun, force), nil
+	results := l.createLinks(sources, dryRun, force)
+
+	if !dryRun {
+		if err := l.recordManifest(results); err != nil {
+			return results, fmt.Errorf("failed to update manifest: %w", err)
+		}
+	}
+
+	return results, nil
+}
+
+// manifestPath returns the path to the manifest file.
+func (l *linker) manifestPath() string {
+	return filepath.Join(l.cfg.TargetDir, ".dottie.links")
+}
+
+// recordManifest updates the manifest with targets from the given results.
+func (l *linker) recordManifest(results []Result) error {
+	mp := l.manifestPath()
+	existing, err := LoadManifest(mp)
+	if err != nil {
+		return err
+	}
+
+	seen := make(map[string]bool, len(existing))
+	for _, p := range existing {
+		seen[p] = true
+	}
+
+	for _, r := range results {
+		if (r.Status == StatusLinked || r.Status == StatusAlreadyLinked) && !seen[r.Target] {
+			seen[r.Target] = true
+			existing = append(existing, r.Target)
+		}
+	}
+
+	sort.Strings(existing)
+	return SaveManifest(mp, existing)
 }
 
 // Check performs a read-only status check of all dotfiles.
@@ -156,6 +197,55 @@ func (l *linker) checkFile(source, target string) Result {
 		r.Message = "exists but not linked to repo"
 	}
 	return r
+}
+
+// Prune reads the manifest and returns entries whose symlinks are dangling
+// (target no longer resolves) or already removed. It is read-only and does
+// not remove anything.
+func (l *linker) Prune() ([]Result, error) {
+	targets, err := LoadManifest(l.manifestPath())
+	if err != nil {
+		return nil, err
+	}
+
+	var results []Result
+	for _, target := range targets {
+		// If the symlink itself is gone, or it's dangling, it's a prune candidate.
+		_, lstatErr := os.Lstat(target)
+		if lstatErr != nil {
+			// Symlink was removed entirely
+			relPath, relErr := filepath.Rel(l.cfg.TargetDir, target)
+			if relErr != nil {
+				relPath = target
+			}
+			results = append(results, Result{
+				Target: target,
+				Name:   relPath,
+				Status: StatusDangling,
+			})
+			continue
+		}
+
+		// Symlink exists — check if it's dangling
+		if _, err := os.Stat(target); err != nil {
+			linkTarget, readErr := os.Readlink(target)
+			if readErr != nil {
+				linkTarget = ""
+			}
+			relPath, relErr := filepath.Rel(l.cfg.TargetDir, target)
+			if relErr != nil {
+				relPath = target
+			}
+			results = append(results, Result{
+				Source: linkTarget,
+				Target: target,
+				Name:   relPath,
+				Status: StatusDangling,
+			})
+		}
+	}
+
+	return results, nil
 }
 
 // collectSourcePaths walks the source directory and collects all file paths.
