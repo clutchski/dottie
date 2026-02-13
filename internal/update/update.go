@@ -9,9 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -97,23 +95,9 @@ func extractBinary(r io.Reader, w io.Writer) (err error) {
 	}
 }
 
-// codesignBinary ad-hoc signs a binary on macOS. This is required for
-// arm64 macOS where unsigned binaries are killed by the kernel.
-func codesignBinary(path string) error {
-	if runtime.GOOS != "darwin" {
-		return nil
-	}
-	out, err := exec.Command("codesign", "--sign", "-", "--force", path).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("codesigning binary: %s: %w", string(out), err)
-	}
-	return nil
-}
-
-// codesignFunc is the function used to codesign binaries. Overridden in tests.
-var codesignFunc = codesignBinary
-
-// atomicReplace sets srcPath executable, codesigns it on macOS, and renames it over destPath.
+// atomicReplace sets srcPath executable and renames it over destPath.
+// The binary is already ad-hoc codesigned at build time by goreleaser,
+// and extracting from the tarball preserves the signature.
 func atomicReplace(srcPath, destPath string) error {
 	cleanup := func() {
 		if err := os.Remove(srcPath); err != nil && !os.IsNotExist(err) {
@@ -124,11 +108,6 @@ func atomicReplace(srcPath, destPath string) error {
 	if err := os.Chmod(srcPath, 0o755); err != nil {
 		cleanup()
 		return fmt.Errorf("setting permissions: %w", err)
-	}
-
-	if err := codesignFunc(srcPath); err != nil {
-		cleanup()
-		return err
 	}
 
 	if err := os.Rename(srcPath, destPath); err != nil {
