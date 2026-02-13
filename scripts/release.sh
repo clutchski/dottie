@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # Release script for dottie
-# Usage: ./scripts/release.sh [major|minor|patch]
+# Usage: ./scripts/release.sh [major|minor|patch|beta]
 
 usage() {
-    echo "Usage: $0 [major|minor|patch]"
+    echo "Usage: $0 [major|minor|patch|beta]"
     echo "  Bumps the version, creates a git tag, and pushes it."
     exit 1
 }
@@ -16,7 +16,7 @@ fi
 
 BUMP_TYPE="$1"
 
-if [[ "$BUMP_TYPE" != "major" && "$BUMP_TYPE" != "minor" && "$BUMP_TYPE" != "patch" ]]; then
+if [[ "$BUMP_TYPE" != "major" && "$BUMP_TYPE" != "minor" && "$BUMP_TYPE" != "patch" && "$BUMP_TYPE" != "beta" ]]; then
     echo "Error: Invalid bump type '$BUMP_TYPE'"
     usage
 fi
@@ -27,6 +27,8 @@ echo "Current version: $LATEST_TAG"
 
 # Strip the 'v' prefix and split into parts
 VERSION="${LATEST_TAG#v}"
+# Strip any pre-release suffix (e.g. -beta.1) before parsing
+VERSION="${VERSION%%-*}"
 IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
 
 # Bump the appropriate part
@@ -35,17 +37,23 @@ case "$BUMP_TYPE" in
         MAJOR=$((MAJOR + 1))
         MINOR=0
         PATCH=0
+        NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
         ;;
     minor)
         MINOR=$((MINOR + 1))
         PATCH=0
+        NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
         ;;
     patch)
         PATCH=$((PATCH + 1))
+        NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+        ;;
+    beta)
+        PATCH=$((PATCH + 1))
+        NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}-beta.1"
         ;;
 esac
 
-NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
 echo "New version: $NEW_VERSION"
 
 # Check for uncommitted changes
@@ -73,4 +81,4 @@ echo "Pushing tag to origin..."
 git push origin "$NEW_VERSION"
 
 echo "Release $NEW_VERSION tagged and pushed."
-echo "GitHub Actions or goreleaser will handle the release build."
+echo "https://github.com/clutchski/dottie/actions"

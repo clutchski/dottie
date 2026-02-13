@@ -61,3 +61,4 @@ build-all:
 # Create a release (using goreleaser)
 release:
 	goreleaser release --clean
+
