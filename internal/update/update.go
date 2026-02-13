@@ -165,6 +165,12 @@ func resolveExecutable() (string, error) {
 	return filepath.EvalSymlinks(exe)
 }
 
+// isHomebrew reports whether the given executable path is inside a Homebrew prefix.
+func isHomebrew(exePath string) bool {
+	return strings.HasPrefix(exePath, "/opt/homebrew/") ||
+		strings.HasPrefix(exePath, "/usr/local/Cellar/")
+}
+
 // VersionStatus holds the result of an async version check.
 type VersionStatus struct {
 	Latest   string
@@ -197,6 +203,11 @@ func GetVersion(currentVersion string) <-chan VersionStatus {
 // InstallFrom fetches the latest version from apiURL, downloads the release from
 // baseDownloadURL, and installs it to exePath. It is the test-friendly variant of Install.
 func InstallFrom(currentVersion, apiURL, baseDownloadURL, exePath string) error {
+	if isHomebrew(exePath) {
+		fmt.Println("dottie is managed by Homebrew. Run: brew upgrade dottie")
+		return nil
+	}
+
 	latest, err := fetchLatestVersion(apiURL)
 	if err != nil {
 		return err

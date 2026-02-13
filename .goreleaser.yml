@@ -50,6 +50,20 @@ changelog:
       - Merge branch
       - Co-Authored-By
 
+brews:
+  - repository:
+      owner: clutchski
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/clutchski/dottie"
+    description: "A dotfiles manager for macOS and Linux"
+    install: |
+      bin.install "dottie"
+    test: |
+      system "#{bin}/dottie", "version"
+
 release:
   github:
     owner: clutchski
