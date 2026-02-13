@@ -30,4 +30,27 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew:
+    name: Update Homebrew tap
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update formula
+        env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF#refs/tags/}"
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/clutchski/homebrew-tap.git" tap
+          tap/scripts/update-formula.sh "$TAG"
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/dottie.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Update dottie to ${TAG}"
+          git push
