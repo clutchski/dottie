@@ -4,6 +4,14 @@ A simple dotfiles manager for macOS and Linux. Keep your dotfiles in a git repo,
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install clutchski/tap/dottie
+```
+
+### Script
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/install.sh | bash
 ```
