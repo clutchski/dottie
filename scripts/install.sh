@@ -2,18 +2,32 @@
 set -e
 
 REPO="clutchski/dottie"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-mkdir -p "$INSTALL_DIR"
 QUIET="${QUIET:-}"
 
 log() {
     [ -z "$QUIET" ] && echo "$@"
 }
 
-# Detect OS
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+# macOS: install via Homebrew
+if [ "$OS" = "darwin" ]; then
+    if ! command -v brew &>/dev/null; then
+        echo "Error: Homebrew is required on macOS. Install it from https://brew.sh"
+        exit 1
+    fi
+    log ""
+    log "==> Installing dottie via Homebrew"
+    log ""
+    brew install clutchski/tap/dottie
+    exit 0
+fi
+
+# Linux: download pre-built binary
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+mkdir -p "$INSTALL_DIR"
+
 case "$OS" in
-    darwin) OS="Darwin" ;;
     linux) OS="Linux" ;;
     *)
         echo "Error: Unsupported OS: $OS"

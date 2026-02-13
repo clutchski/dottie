@@ -208,3 +208,33 @@ func TestGetVersionFromOutdated(t *testing.T) {
 	assert.Equal(t, "v2.0.0", result.Latest)
 	assert.False(t, result.UpToDate)
 }
+
+func TestIsHomebrew(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"homebrew arm64", "/opt/homebrew/Cellar/dottie/1.0/bin/dottie", true},
+		{"homebrew intel", "/usr/local/Cellar/dottie/1.0/bin/dottie", true},
+		{"local bin", "/home/user/.local/bin/dottie", false},
+		{"usr local bin", "/usr/local/bin/dottie", false},
+		{"empty path", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isHomebrew(tt.path))
+		})
+	}
+}
+
+func TestInstallFromReturnsEarlyForHomebrew(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not make any HTTP requests for Homebrew installs")
+	}))
+	defer srv.Close()
+
+	err := InstallFrom("v1.0.0", srv.URL, srv.URL, "/opt/homebrew/Cellar/dottie/1.0/bin/dottie")
+	assert.NoError(t, err)
+}

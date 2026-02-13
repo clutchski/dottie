@@ -74,7 +74,6 @@ Commands:
   prune          Remove dangling symlinks left by deleted dotfiles
   hooks          Manage hooks (list, run)
   status         Show status of dotfiles
-  update         Update dottie to the latest version
   version        Show version information
   help           Show this help message`)
 }
