@@ -109,12 +109,14 @@ func cmdRun(args []string) int {
 	force := fs.Bool("f", false, "force")
 	verbose := fs.Bool("v", false, "verbose")
 	veryVerbose := fs.Bool("vv", false, "show all output")
+	noProgress := fs.Bool("no-progress", false, "disable progress spinner")
 	if err := fs.Parse(args); err != nil {
 		return fatal(err)
 	}
 
 	p := console.New(verbosity(*verbose, *veryVerbose))
-	progress := console.NewProgress(p.Out(), p.IsTTY() && p.Verbosity() == console.Quiet)
+	showProgress := p.IsTTY() && p.Verbosity() == console.Quiet && !*noProgress
+	progress := console.NewProgress(p.Out(), showProgress)
 
 	cfg, err := loadConfig()
 	if err != nil {
