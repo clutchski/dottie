@@ -10,11 +10,14 @@ import (
 	"github.com/fatih/color"
 )
 
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
 
 var (
-	progressYellow = color.New(color.FgYellow)
-	progressGrey   = color.New(color.FgHiBlack)
+	progressGrey = color.New(color.FgHiBlack)
+
+	// pulseGradient cycles ANSI-256 colors from dark amber to bright gold and back.
+	pulseGradient = []int{130, 166, 172, 208, 214, 220, 214, 208, 172, 166}
+	pulseEnabled  = true
 
 	// taskPalette is a set of bright colors assigned to hook names.
 	taskPalette = []*color.Color{
@@ -29,11 +32,20 @@ var (
 
 // disableProgressColor turns off color for tests.
 func disableProgressColor() {
-	progressYellow.DisableColor()
+	pulseEnabled = false
 	progressGrey.DisableColor()
 	for _, c := range taskPalette {
 		c.DisableColor()
 	}
+}
+
+// pulseColor wraps text in an ANSI-256 color from the pulse gradient.
+func pulseColor(frame int, text string) string {
+	if !pulseEnabled {
+		return text
+	}
+	code := pulseGradient[frame%len(pulseGradient)]
+	return fmt.Sprintf("\033[38;5;%dm%s\033[0m", code, text)
 }
 
 // Progress manages an in-place status line on a TTY.
@@ -115,6 +127,17 @@ func (p *Progress) SetMessage(msg string) {
 	p.ticker.Reset(100 * time.Millisecond)
 }
 
+// Clear clears the progress line so other output can print cleanly.
+// The spinner resumes on the next tick.
+func (p *Progress) Clear() {
+	if !p.isTTY {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.clearLine()
+}
+
 // Stop stops the ticker, clears the line, and prepares for final output.
 func (p *Progress) Stop() {
 	if !p.isTTY {
@@ -153,7 +176,7 @@ func (p *Progress) render() {
 		return
 	}
 
-	spinner := progressYellow.Sprint(spinnerFrames[p.frame%len(spinnerFrames)])
+	spinner := pulseColor(p.frame/2, spinnerFrames[p.frame%len(spinnerFrames)])
 	sep := progressGrey.Sprint("·")
 	p.frame++
 

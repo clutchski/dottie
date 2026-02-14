@@ -177,6 +177,7 @@ func cmdRun(args []string) int {
 	var ls console.LinkSummary
 	p.Header("links")
 	for _, r := range results {
+		progress.Clear()
 		p.PrintLink(r)
 		switch r.Status {
 		case link.StatusLinked:
@@ -188,6 +189,7 @@ func cmdRun(args []string) int {
 		}
 	}
 	for _, r := range dangling {
+		progress.Clear()
 		p.PrintLink(r)
 	}
 	ls.Pruned = len(dangling)
@@ -534,6 +536,7 @@ func runHooksPhaseWithProgress(runner *hooks.Runner, p *console.Printer, prog *c
 	p.Header("hooks " + phase)
 	for r := range runner.RunPhase(phase, dryRun) {
 		prog.FinishTask(r.Name)
+		prog.Clear()
 		p.PrintHook(r, phase)
 		total++
 		if r.Ok() {

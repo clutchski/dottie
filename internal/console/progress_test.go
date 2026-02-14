@@ -96,7 +96,7 @@ func TestProgress_SpinnerFrames(t *testing.T) {
 
 	output := buf.String()
 	// Should contain spinner characters from the set
-	frames := []string{"\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"}
+	frames := spinnerFrames
 	found := 0
 	for _, f := range frames {
 		if strings.Contains(output, f) {
@@ -203,6 +203,45 @@ func TestProgress_SetMessage_ClearsActiveList(t *testing.T) {
 		}
 	}
 	assert.True(t, foundLinkingWithoutHooks, "SetMessage should replace active task list")
+}
+
+func TestProgress_Clear_NonTTY_IsNoOp(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewProgress(&buf, false)
+	p.Clear() // should not panic or write anything
+	assert.Empty(t, buf.String())
+}
+
+func TestProgress_Clear_ClearsProgressLine(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewProgress(&buf, true)
+	p.SetMessage("working")
+	time.Sleep(150 * time.Millisecond)
+	p.Clear()
+	p.Stop()
+
+	output := buf.String()
+	// Clear + Stop should produce at least 2 clear sequences
+	count := strings.Count(output, "\r\033[K")
+	assert.GreaterOrEqual(t, count, 2)
+}
+
+func TestProgress_PulseGradient(t *testing.T) {
+	var buf bytes.Buffer
+	// Re-enable pulse for this test (init disables it)
+	old := pulseEnabled
+	pulseEnabled = true
+	defer func() { pulseEnabled = old }()
+
+	p := NewProgress(&buf, true)
+	p.SetMessage("working")
+
+	time.Sleep(150 * time.Millisecond)
+	p.Stop()
+
+	output := buf.String()
+	// Should contain ANSI 256-color escape sequences from the gradient
+	assert.Contains(t, output, "\033[38;5;")
 }
 
 func TestProgress_PhaseLabel(t *testing.T) {
