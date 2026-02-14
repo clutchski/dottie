@@ -114,6 +114,7 @@ func cmdRun(args []string) int {
 	}
 
 	p := console.New(verbosity(*verbose, *veryVerbose))
+	progress := console.NewProgress(p.Out(), p.IsTTY() && p.Verbosity() == console.Quiet)
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -121,19 +122,24 @@ func cmdRun(args []string) int {
 	}
 
 	hookRunner := newHookRunner(cfg)
+
 	// Run pre-link hooks
-	preOk, preTotal := runHooksPhase(hookRunner, p, "pre-link", *dryRun)
+	preOk, preTotal := runHooksPhaseWithProgress(hookRunner, p, progress, "pre-link", *dryRun)
 
 	// Link dotfiles
 	linker := link.New(cfg)
 	results, err := linker.Link(*dryRun, *force)
 	if err != nil {
+		progress.Stop()
 		return fatal(err)
 	}
+
+	progress.SetMessage(fmt.Sprintf("linking %d files", len(results)))
 
 	// Prune dangling links
 	dangling, err := linker.Prune()
 	if err != nil {
+		progress.Stop()
 		return fatal(err)
 	}
 	pruned := 0
@@ -185,7 +191,9 @@ func cmdRun(args []string) int {
 	ls.Pruned = len(dangling)
 
 	// Run post-link hooks
-	postOk, postTotal := runHooksPhase(hookRunner, p, "post-link", *dryRun)
+	postOk, postTotal := runHooksPhaseWithProgress(hookRunner, p, progress, "post-link", *dryRun)
+
+	progress.Stop()
 
 	p.Summary(preOk, preTotal, ls, postOk, postTotal)
 
@@ -511,6 +519,45 @@ func runHooksPhase(runner *hooks.Runner, p *console.Printer, phase string, dryRu
 		}
 	}
 	return ok, total
+}
+
+func runHooksPhaseWithProgress(runner *hooks.Runner, p *console.Printer, prog *console.Progress, phase string, dryRun bool) (ok, total int) {
+	scripts, err := runner.List()
+	if err != nil {
+		scripts = nil
+	}
+	names := hookDisplayNames(scripts)
+	prog.SetTasks(phaseLabel(phase), names)
+
+	p.Header("hooks " + phase)
+	for r := range runner.RunPhase(phase, dryRun) {
+		prog.FinishTask(r.Name)
+		p.PrintHook(r, phase)
+		total++
+		if r.Ok() {
+			ok++
+		}
+	}
+	return ok, total
+}
+
+func phaseLabel(phase string) string {
+	switch phase {
+	case "pre-link":
+		return "hooks:pre"
+	case "post-link":
+		return "hooks:post"
+	default:
+		return phase
+	}
+}
+
+func hookDisplayNames(scripts []string) []string {
+	names := make([]string, len(scripts))
+	for i, s := range scripts {
+		names[i] = hooks.DisplayName(filepath.Base(s))
+	}
+	return names
 }
 
 func newHookRunner(cfg *config.Config) *hooks.Runner {
