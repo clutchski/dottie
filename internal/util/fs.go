@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -37,21 +36,6 @@ func SymlinkTarget(path string) (string, error) {
 		return "", fmt.Errorf("%s is not a symlink", path)
 	}
 	return os.Readlink(path)
-}
-
-// ExpandPath expands ~ to the user's home directory.
-func ExpandPath(path string) (string, error) {
-	if path == "~" {
-		return os.UserHomeDir()
-	}
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(home, path[2:]), nil
-	}
-	return path, nil
 }
 
 // EnsureDir creates a directory and all parent directories if they don't exist.
@@ -182,11 +166,11 @@ func CopyDir(src, dst string) error {
 	return nil
 }
 
-// IsDir returns true if the path is a directory.
-func IsDir(path string) bool {
-	fi, err := os.Stat(path)
+// IsExecutable returns true if the file at path has any execute permission bits set.
+func IsExecutable(path string) bool {
+	info, err := os.Stat(path)
 	if err != nil {
 		return false
 	}
-	return fi.IsDir()
+	return info.Mode()&0o111 != 0
 }

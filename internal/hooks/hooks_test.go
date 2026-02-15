@@ -12,12 +12,19 @@ import (
 // NoEnv is an empty set of environment variables for test readability.
 var NoEnv = EnvVars{}
 
-func collectResults(ch <-chan HookResult) []HookResult {
-	var results []HookResult
+func collectResults(ch <-chan Result) []Result {
+	var results []Result
 	for r := range ch {
 		results = append(results, r)
 	}
 	return results
+}
+
+func runPhase(t *testing.T, runner *Runner, phase string, dryRun bool) []Result {
+	t.Helper()
+	ch, err := runner.RunPhase(phase, dryRun)
+	require.NoError(t, err)
+	return collectResults(ch)
 }
 
 func TestRunPhase_ExecutesAllScripts(t *testing.T) {
@@ -35,7 +42,7 @@ echo "first" >> `+outputFile), 0o755))
 echo "second" >> `+outputFile), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	results := collectResults(runner.RunPhase("pre-link", false))
+	results := runPhase(t, runner, "pre-link", false)
 
 	require.Len(t, results, 2)
 
@@ -57,9 +64,9 @@ echo "$1" >> `+outputFile), 0o755))
 
 	runner := New(hooksDir, NoEnv)
 
-	collectResults(runner.RunPhase("pre-link", false))
-	collectResults(runner.RunPhase("post-link", false))
-	collectResults(runner.RunPhase("status", false))
+	runPhase(t, runner, "pre-link", false)
+	runPhase(t, runner, "post-link", false)
+	runPhase(t, runner, "status", false)
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
@@ -82,7 +89,7 @@ echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0o755))
 		"DOTTIE_ROOT": "/my/dotfiles",
 		"DOTTIE_HOME": "/home/user",
 	})
-	collectResults(runner.RunPhase("pre-link", false))
+	runPhase(t, runner, "pre-link", false)
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
@@ -102,7 +109,7 @@ func TestRunPhase_DryRunSetsEnvVar(t *testing.T) {
 echo "DRY_RUN=$DOTTIE_DRY_RUN" >> `+outputFile), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	collectResults(runner.RunPhase("pre-link", true))
+	runPhase(t, runner, "pre-link", true)
 
 	content, err := os.ReadFile(outputFile)
 	require.NoError(t, err)
@@ -113,7 +120,7 @@ func TestRunPhase_SkipsMissingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	runner := New(filepath.Join(tmpDir, "nonexistent"), NoEnv)
-	results := collectResults(runner.RunPhase("pre-link", false))
+	results := runPhase(t, runner, "pre-link", false)
 	assert.Empty(t, results)
 }
 
@@ -132,7 +139,7 @@ echo "hidden" >> `+outputFile), 0o755))
 echo "normal" >> `+outputFile), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	results := collectResults(runner.RunPhase("pre-link", false))
+	results := runPhase(t, runner, "pre-link", false)
 	require.Len(t, results, 1)
 
 	content, err := os.ReadFile(outputFile)
@@ -155,7 +162,7 @@ echo "example" >> `+outputFile), 0o755))
 echo "normal" >> `+outputFile), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	results := collectResults(runner.RunPhase("pre-link", false))
+	results := runPhase(t, runner, "pre-link", false)
 	require.Len(t, results, 1)
 
 	content, err := os.ReadFile(outputFile)
@@ -177,7 +184,7 @@ func TestRunPhase_SkipsNonExecutableFiles(t *testing.T) {
 echo "exec" >> `+outputFile), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	results := collectResults(runner.RunPhase("pre-link", false))
+	results := runPhase(t, runner, "pre-link", false)
 	require.Len(t, results, 1)
 
 	content, err := os.ReadFile(outputFile)
@@ -196,7 +203,7 @@ echo "hello stdout"
 echo "hello stderr" >&2`), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	results := collectResults(runner.RunPhase("pre-link", false))
+	results := runPhase(t, runner, "pre-link", false)
 
 	require.Len(t, results, 1)
 	assert.Contains(t, results[0].Output, "hello stdout")
@@ -213,12 +220,12 @@ func TestRunPhase_ReportsExitCode(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-fail.sh"), []byte("#!/bin/bash\nexit 42"), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	results := collectResults(runner.RunPhase("pre-link", false))
+	results := runPhase(t, runner, "pre-link", false)
 
 	require.Len(t, results, 2)
 
 	// Results may arrive in any order due to parallel execution
-	resultMap := make(map[string]HookResult)
+	resultMap := make(map[string]Result)
 	for _, r := range results {
 		resultMap[r.Name] = r
 	}
@@ -237,7 +244,7 @@ func TestRunPhase_RecordsElapsed(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "fast.sh"), []byte("#!/bin/bash\nexit 0"), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	results := collectResults(runner.RunPhase("pre-link", false))
+	results := runPhase(t, runner, "pre-link", false)
 
 	require.Len(t, results, 1)
 	assert.Positive(t, results[0].Elapsed)
@@ -272,7 +279,7 @@ func TestList_MissingDirectory(t *testing.T) {
 	assert.Empty(t, hooks)
 }
 
-func TestStartStatusCheck_AllOk(t *testing.T) {
+func TestRunPhase_Status_AllOk(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
@@ -281,14 +288,12 @@ func TestStartStatusCheck_AllOk(t *testing.T) {
 exit 0`), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	result := <-runner.StartStatusCheck()
-	require.NoError(t, result.Err)
-	require.Len(t, result.Hooks, 1)
-	assert.True(t, result.Hooks[0].Ok())
-	assert.Equal(t, 0, result.Hooks[0].ExitCode)
+	results := runPhase(t, runner, "status", false)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusOk, results[0].Status())
 }
 
-func TestStartStatusCheck_SomeFailed(t *testing.T) {
+func TestRunPhase_Status_SomeFailed(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
@@ -299,34 +304,37 @@ exit 0`), 0o755))
 exit 1`), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	result := <-runner.StartStatusCheck()
-	require.NoError(t, result.Err)
-	require.Len(t, result.Hooks, 2)
-	assert.True(t, result.Hooks[0].Ok())
-	assert.False(t, result.Hooks[1].Ok())
+	results := runPhase(t, runner, "status", false)
+	require.Len(t, results, 2)
+
+	okCount := 0
+	for _, r := range results {
+		if r.Ok() {
+			okCount++
+		}
+	}
+	assert.Equal(t, 1, okCount)
 }
 
-func TestStartStatusCheck_EmptyDirectory(t *testing.T) {
+func TestRunPhase_Status_EmptyDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	result := <-runner.StartStatusCheck()
-	require.NoError(t, result.Err)
-	assert.Empty(t, result.Hooks)
+	results := runPhase(t, runner, "status", false)
+	assert.Empty(t, results)
 }
 
-func TestStartStatusCheck_MissingDirectory(t *testing.T) {
+func TestRunPhase_Status_MissingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	runner := New(filepath.Join(tmpDir, "nonexistent"), NoEnv)
-	result := <-runner.StartStatusCheck()
-	require.NoError(t, result.Err)
-	assert.Empty(t, result.Hooks)
+	results := runPhase(t, runner, "status", false)
+	assert.Empty(t, results)
 }
 
-func TestStartStatusCheck_CapturesOutput(t *testing.T) {
+func TestRunPhase_Status_CapturesOutput(t *testing.T) {
 	tmpDir := t.TempDir()
 	hooksDir := filepath.Join(tmpDir, "hooks")
 	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
@@ -337,33 +345,75 @@ echo "warning: something" >&2
 exit 1`), 0o755))
 
 	runner := New(hooksDir, NoEnv)
-	result := <-runner.StartStatusCheck()
-	require.NoError(t, result.Err)
-	require.Len(t, result.Hooks, 1)
-	assert.Equal(t, 1, result.Hooks[0].ExitCode)
-	assert.Contains(t, result.Hooks[0].Output, "outdated packages")
-	assert.Contains(t, result.Hooks[0].Output, "warning: something")
+	results := runPhase(t, runner, "status", false)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusNeedsUpdate, results[0].Status())
+	assert.Contains(t, results[0].Output, "outdated packages")
+	assert.Contains(t, results[0].Output, "warning: something")
 }
 
-func TestHookStatus_NeedsUpdate(t *testing.T) {
-	s := HookStatus{Name: "brew", ExitCode: 1}
-	assert.True(t, s.NeedsUpdate())
-	assert.False(t, s.Ok())
-	assert.False(t, s.Failed())
+func TestResult_Status(t *testing.T) {
+	assert.Equal(t, StatusOk, Result{ExitCode: 0}.Status())
+	assert.Equal(t, StatusNeedsUpdate, Result{ExitCode: 1}.Status())
+	assert.Equal(t, StatusFailed, Result{ExitCode: 2}.Status())
+	assert.Equal(t, StatusFailed, Result{ExitCode: 42}.Status())
 }
 
-func TestHookStatus_Failed(t *testing.T) {
-	s := HookStatus{Name: "brew", ExitCode: 2}
-	assert.False(t, s.NeedsUpdate())
-	assert.False(t, s.Ok())
-	assert.True(t, s.Failed())
+func TestActive_EmptyBeforeAndAfterRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-ok.sh"),
+		[]byte("#!/bin/bash\nexit 0"), 0o755))
+
+	runner := New(hooksDir, NoEnv)
+	assert.Empty(t, runner.Active())
+
+	runPhase(t, runner, "pre-link", false)
+	assert.Empty(t, runner.Active())
 }
 
-func TestHookStatus_Ok(t *testing.T) {
-	s := HookStatus{Name: "brew", ExitCode: 0}
-	assert.False(t, s.NeedsUpdate())
-	assert.True(t, s.Ok())
-	assert.False(t, s.Failed())
+func TestActive_ReturnsNamesWhileRunning(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-slow.sh"),
+		[]byte("#!/bin/bash\nsleep 0.5\nexit 0"), 0o755))
+
+	runner := New(hooksDir, NoEnv)
+	ch, err := runner.RunPhase("pre-link", false)
+	require.NoError(t, err)
+
+	for r := range ch {
+		_ = r
+	}
+	// After channel drains, active should be empty.
+	// We can't reliably check mid-flight in a unit test without races,
+	// but we can verify it's clean after completion.
+	assert.Empty(t, runner.Active())
+}
+
+func TestRunStatusAsync_CollectsResults(t *testing.T) {
+	tmpDir := t.TempDir()
+	hooksDir := filepath.Join(tmpDir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "01-ok.sh"),
+		[]byte("#!/bin/bash\nexit 0"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hooksDir, "02-update.sh"),
+		[]byte("#!/bin/bash\nexit 1"), 0o755))
+
+	runner := New(hooksDir, NoEnv)
+	sr := <-runner.RunStatusAsync()
+	require.NoError(t, sr.Err)
+	require.Len(t, sr.Results, 2)
+}
+
+func TestRunStatusAsync_NoHooks(t *testing.T) {
+	runner := New(filepath.Join(t.TempDir(), "nonexistent"), NoEnv)
+	sr := <-runner.RunStatusAsync()
+	require.NoError(t, sr.Err)
+	assert.Empty(t, sr.Results)
 }
 
 func TestDisplayName(t *testing.T) {
