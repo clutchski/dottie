@@ -345,3 +345,19 @@ func TestErrorf_AlwaysPrintsToStderr(t *testing.T) {
 	p.Errorf("something %s", "bad")
 	assert.Equal(t, "something bad\n", errBuf.String())
 }
+
+// --- Out ---
+
+func TestOut_ReturnsWriter(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	p := NewWithWriters(&out, &errBuf, Quiet)
+	assert.Equal(t, &out, p.Out())
+}
+
+// --- IsTTY ---
+
+func TestIsTTY_ReturnsFalseForBuffer(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	p := NewWithWriters(&out, &errBuf, Quiet)
+	assert.False(t, p.IsTTY())
+}

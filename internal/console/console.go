@@ -10,6 +10,7 @@ import (
 	"github.com/clutchski/dottie/internal/hooks"
 	"github.com/clutchski/dottie/internal/link"
 	"github.com/fatih/color"
+	"github.com/mattn/go-isatty"
 )
 
 // Verbosity controls output detail level.
@@ -76,6 +77,17 @@ func NewWithWriters(out, err io.Writer, v Verbosity) *Printer {
 
 // Verbosity returns the printer's verbosity level.
 func (p *Printer) Verbosity() Verbosity { return p.verbosity }
+
+// Out returns the printer's output writer.
+func (p *Printer) Out() io.Writer { return p.out }
+
+// IsTTY returns true if the output writer is a terminal.
+func (p *Printer) IsTTY() bool {
+	if f, ok := p.out.(*os.File); ok {
+		return isatty.IsTerminal(f.Fd())
+	}
+	return false
+}
 
 // Header prints a section header. In verbose mode it prints immediately.
 // In quiet mode it stores the header and only prints it if a failure follows.
