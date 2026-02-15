@@ -33,7 +33,9 @@ type Printer struct {
 	out           io.Writer
 	err           io.Writer
 	verbosity     Verbosity
+	targetDir     string
 	pendingHeader string
+	seen          map[string]bool
 	green         *color.Color
 	red           *color.Color
 	bold          *color.Color
@@ -81,6 +83,9 @@ func (p *Printer) Verbosity() Verbosity { return p.verbosity }
 // Out returns the printer's output writer.
 func (p *Printer) Out() io.Writer { return p.out }
 
+// SetTargetDir sets the target directory used for display path formatting.
+func (p *Printer) SetTargetDir(dir string) { p.targetDir = dir }
+
 // IsTTY returns true if the output writer is a terminal.
 func (p *Printer) IsTTY() bool {
 	if f, ok := p.out.(*os.File); ok {
@@ -107,8 +112,21 @@ func (p *Printer) flushHeader() {
 	}
 }
 
-// PrintHook prints a hook result.
-func (p *Printer) PrintHook(r hooks.HookResult, phase string) {
+// sectionHeader prints a section header once per unique name.
+func (p *Printer) sectionHeader(name string) {
+	if p.seen[name] {
+		return
+	}
+	if p.seen == nil {
+		p.seen = make(map[string]bool)
+	}
+	p.seen[name] = true
+	p.Header(name)
+}
+
+// PrintHook prints a hook result, auto-emitting the section header on first call per phase.
+func (p *Printer) PrintHook(r hooks.Result, phase string) {
+	p.sectionHeader("hooks " + phase)
 	if r.Ok() {
 		p.hookOk(r.Name, r.Elapsed, r.Output)
 	} else if phase == "status" && r.ExitCode == 1 {
@@ -118,11 +136,13 @@ func (p *Printer) PrintHook(r hooks.HookResult, phase string) {
 	}
 }
 
-// PrintLink prints a link result.
+// PrintLink prints a link result, auto-emitting the "links" section header on first call.
 func (p *Printer) PrintLink(r link.Result) {
+	p.sectionHeader("links")
+	target := p.formatTarget(r.Target)
 	switch r.Status {
 	case link.StatusLinked, link.StatusAlreadyLinked, link.StatusWouldLink:
-		p.linkOk(r.Name, r.Target)
+		p.linkOk(r.Name, target)
 	case link.StatusError:
 		msg := "error"
 		if r.Error != nil {
@@ -138,46 +158,26 @@ func (p *Printer) PrintLink(r link.Result) {
 	}
 }
 
-// PrintHookStatus prints a hook status check result.
-func (p *Printer) PrintHookStatus(s hooks.HookStatus) {
-	name := hooks.DisplayName(s.Name)
-	if s.Ok() {
-		p.hookOk(name, 0, s.Output)
-	} else if s.NeedsUpdate() {
-		p.hookNeedsUpdate(name, s.Output)
-	} else {
-		p.linkFail(name, "hook failed")
-	}
-}
-
-// LinkSummary holds link counts for the run summary.
-type LinkSummary struct {
-	Existing int // already linked, no change
-	Added    int // newly linked
-	Pruned   int // orphan/pruned
-	Errors   int // link errors
-}
-
 // Summary prints a one-line run summary with ok/total counts per phase.
-func (p *Printer) Summary(preOk, preTotal int, ls LinkSummary, postOk, postTotal int) {
+func (p *Printer) Summary(preOk, preTotal int, ls link.Summary, postOk, postTotal int) {
 	failed := ls.Errors > 0 || preOk < preTotal || postOk < postTotal
 	symbol := p.green.Sprint("✓")
 	if failed {
 		symbol = p.red.Sprint("✗")
 	}
 	sep := p.grey.Sprint("·")
-	parts := []string{fmt.Sprintf("%s dottie", symbol)}
+	parts := []string{fmt.Sprintf("%s %s", symbol, p.bold.Sprint("dottie is done"))}
 	if preTotal > 0 {
-		parts = append(parts, fmt.Sprintf("hooks:pre %s", p.colorCount(preOk, preTotal)))
+		parts = append(parts, fmt.Sprintf("%s %s", p.grey.Sprint("hooks:pre"), p.colorCount(preOk, preTotal)))
 	}
-	parts = append(parts, fmt.Sprintf("links %s", p.linkSummary(ls)))
+	parts = append(parts, fmt.Sprintf("%s %s", p.grey.Sprint("links"), p.linkSummary(ls)))
 	if postTotal > 0 {
-		parts = append(parts, fmt.Sprintf("hooks:post %s", p.colorCount(postOk, postTotal)))
+		parts = append(parts, fmt.Sprintf("%s %s", p.grey.Sprint("hooks:post"), p.colorCount(postOk, postTotal)))
 	}
 	fmt.Fprintln(p.out, strings.Join(parts, " "+sep+" "))
 }
 
-func (p *Printer) linkSummary(ls LinkSummary) string {
+func (p *Printer) linkSummary(ls link.Summary) string {
 	parts := []string{p.grey.Sprintf("%d", ls.Existing)}
 	if ls.Added > 0 {
 		parts = append(parts, p.green.Sprintf("+%d", ls.Added))
@@ -312,6 +312,18 @@ func (p *Printer) linkInfo(name, msg string) {
 func (p *Printer) linkFail(name, msg string) {
 	p.flushHeader()
 	fmt.Fprintf(p.out, "  %s %s (%s)\n", p.red.Sprint("✗"), name, msg)
+}
+
+// formatTarget replaces the home directory prefix with ~ for display.
+func (p *Printer) formatTarget(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if p.targetDir == home && strings.HasPrefix(path, home) {
+		return "~" + strings.TrimPrefix(path, home)
+	}
+	return path
 }
 
 func (p *Printer) colorCount(ok, total int) string {

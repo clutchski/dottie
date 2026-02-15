@@ -3,6 +3,7 @@ package console
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/fatih/color"
 	"github.com/stretchr/testify/assert"
 )
+
+func countOccurrences(s, substr string) int {
+	return strings.Count(s, substr)
+}
 
 func newTestPrinter(v Verbosity) (*Printer, *bytes.Buffer, *bytes.Buffer) {
 	color.NoColor = true
@@ -23,29 +28,28 @@ func newTestPrinter(v Verbosity) (*Printer, *bytes.Buffer, *bytes.Buffer) {
 
 func TestPrintHook_OkVerbose(t *testing.T) {
 	p, out, _ := newTestPrinter(Verbose)
-	p.PrintHook(hooks.HookResult{Name: "homebrew", ExitCode: 0, Elapsed: 100 * time.Millisecond}, "pre-link")
-	assert.Equal(t, "  ✓ homebrew (0.1s)\n", out.String())
+	p.PrintHook(hooks.Result{Name: "homebrew", ExitCode: 0, Elapsed: 100 * time.Millisecond}, "pre-link")
+	assert.Equal(t, "hooks pre-link:\n  ✓ homebrew (0.1s)\n", out.String())
 }
 
 func TestPrintHook_OkQuiet(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.PrintHook(hooks.HookResult{Name: "homebrew", ExitCode: 0, Elapsed: 100 * time.Millisecond}, "pre-link")
+	p.PrintHook(hooks.Result{Name: "homebrew", ExitCode: 0, Elapsed: 100 * time.Millisecond}, "pre-link")
 	assert.Empty(t, out.String())
 }
 
 func TestPrintHook_FailVerbose(t *testing.T) {
 	p, out, _ := newTestPrinter(Verbose)
-	p.Header("hooks pre-link")
-	p.PrintHook(hooks.HookResult{Name: "homebrew", ExitCode: 1, Elapsed: 200 * time.Millisecond, Output: "brew not found"}, "pre-link")
+	p.PrintHook(hooks.Result{Name: "homebrew", ExitCode: 1, Elapsed: 200 * time.Millisecond, Output: "brew not found"}, "pre-link")
 	output := out.String()
+	assert.Contains(t, output, "hooks pre-link:\n")
 	assert.Contains(t, output, "  ✗ homebrew pre-link hook failed (0.2s)")
 	assert.Contains(t, output, "    | brew not found")
 }
 
 func TestPrintHook_FailQuietFlushesHeader(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Header("hooks pre-link")
-	p.PrintHook(hooks.HookResult{Name: "setup", ExitCode: 42, Elapsed: 50 * time.Millisecond, Output: "error"}, "pre-link")
+	p.PrintHook(hooks.Result{Name: "setup", ExitCode: 42, Elapsed: 50 * time.Millisecond, Output: "error"}, "pre-link")
 	output := out.String()
 	assert.Contains(t, output, "hooks pre-link:\n")
 	assert.Contains(t, output, "  ✗ setup pre-link hook failed")
@@ -56,19 +60,19 @@ func TestPrintHook_FailQuietFlushesHeader(t *testing.T) {
 func TestPrintLink_Linked(t *testing.T) {
 	p, out, _ := newTestPrinter(Verbose)
 	p.PrintLink(link.Result{Name: "vimrc", Target: "~/.vimrc", Status: link.StatusLinked})
-	assert.Equal(t, "  ✓ vimrc -> ~/.vimrc\n", out.String())
+	assert.Equal(t, "links:\n  ✓ vimrc -> ~/.vimrc\n", out.String())
 }
 
 func TestPrintLink_AlreadyLinked(t *testing.T) {
 	p, out, _ := newTestPrinter(Verbose)
 	p.PrintLink(link.Result{Name: "vimrc", Target: "~/.vimrc", Status: link.StatusAlreadyLinked})
-	assert.Equal(t, "  ✓ vimrc -> ~/.vimrc\n", out.String())
+	assert.Equal(t, "links:\n  ✓ vimrc -> ~/.vimrc\n", out.String())
 }
 
 func TestPrintLink_WouldLink(t *testing.T) {
 	p, out, _ := newTestPrinter(Verbose)
 	p.PrintLink(link.Result{Name: "vimrc", Target: "~/.vimrc", Status: link.StatusWouldLink})
-	assert.Equal(t, "  ✓ vimrc -> ~/.vimrc\n", out.String())
+	assert.Equal(t, "links:\n  ✓ vimrc -> ~/.vimrc\n", out.String())
 }
 
 func TestPrintLink_OkQuietSuppressed(t *testing.T) {
@@ -79,7 +83,6 @@ func TestPrintLink_OkQuietSuppressed(t *testing.T) {
 
 func TestPrintLink_Error(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Header("links")
 	p.PrintLink(link.Result{Name: "vimrc", Status: link.StatusError, Error: fmt.Errorf("permission denied")})
 	output := out.String()
 	assert.Contains(t, output, "links:\n")
@@ -89,25 +92,31 @@ func TestPrintLink_Error(t *testing.T) {
 func TestPrintLink_ErrorNilError(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
 	p.PrintLink(link.Result{Name: "vimrc", Status: link.StatusError})
-	assert.Contains(t, out.String(), "  ✗ vimrc (error)")
+	output := out.String()
+	assert.Contains(t, output, "links:\n")
+	assert.Contains(t, output, "  ✗ vimrc (error)")
 }
 
 func TestPrintLink_Missing(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
 	p.PrintLink(link.Result{Name: "vimrc", Status: link.StatusMissing, Message: "not linked"})
-	assert.Contains(t, out.String(), "  ✗ vimrc (not linked)")
+	output := out.String()
+	assert.Contains(t, output, "links:\n")
+	assert.Contains(t, output, "  ✗ vimrc (not linked)")
 }
 
 func TestPrintLink_Diff(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
 	p.PrintLink(link.Result{Name: "vimrc", Status: link.StatusDiff, Message: "symlink points to /other"})
-	assert.Contains(t, out.String(), "  ✗ vimrc (symlink points to /other)")
+	output := out.String()
+	assert.Contains(t, output, "links:\n")
+	assert.Contains(t, output, "  ✗ vimrc (symlink points to /other)")
 }
 
 func TestPrintLink_DanglingVerbose(t *testing.T) {
 	p, out, _ := newTestPrinter(Verbose)
-	p.Header("links")
 	p.PrintLink(link.Result{Name: ".vimrc", Status: link.StatusDangling})
+	assert.Contains(t, out.String(), "links:\n")
 	assert.Contains(t, out.String(), "  ✗ .vimrc (orphan)")
 }
 
@@ -117,38 +126,32 @@ func TestPrintLink_DanglingQuietSuppressed(t *testing.T) {
 	assert.Empty(t, out.String())
 }
 
-// --- PrintHookStatus ---
+// --- PrintHook status phase ---
 
-func TestPrintHookStatus_Ok(t *testing.T) {
+func TestPrintHook_StatusOk(t *testing.T) {
 	p, out, _ := newTestPrinter(Verbose)
-	p.PrintHookStatus(hooks.HookStatus{Name: "homebrew.sh", ExitCode: 0})
-	assert.Equal(t, "  ✓ homebrew (0.0s)\n", out.String())
+	p.PrintHook(hooks.Result{Name: "homebrew", ExitCode: 0}, "status")
+	assert.Equal(t, "hooks status:\n  ✓ homebrew (0.0s)\n", out.String())
 }
 
-func TestPrintHookStatus_Fail(t *testing.T) {
+func TestPrintHook_StatusFail(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Header("hooks")
-	p.PrintHookStatus(hooks.HookStatus{Name: "homebrew.sh", ExitCode: 2})
+	p.PrintHook(hooks.Result{Name: "homebrew", ExitCode: 2}, "status")
 	output := out.String()
-	assert.Contains(t, output, "hooks:\n")
-	assert.Contains(t, output, "  ✗ homebrew (hook failed)")
+	assert.Contains(t, output, "hooks status:\n")
+	assert.Contains(t, output, "  ✗ homebrew status hook failed")
 }
 
-func TestPrintHookStatus_NeedsUpdate(t *testing.T) {
+func TestPrintHook_StatusNeedsUpdate(t *testing.T) {
 	p, out, _ := newTestPrinter(Verbose)
-	p.PrintHookStatus(hooks.HookStatus{Name: "homebrew.sh", ExitCode: 1, Output: "outdated"})
-	assert.Contains(t, out.String(), "~ homebrew (needs update)")
-}
-
-func TestPrintHook_StatusPhaseNeedsUpdate(t *testing.T) {
-	p, out, _ := newTestPrinter(Verbose)
-	p.PrintHook(hooks.HookResult{Name: "homebrew", ExitCode: 1, Elapsed: 100 * time.Millisecond, Output: "outdated"}, "status")
+	p.PrintHook(hooks.Result{Name: "homebrew", ExitCode: 1, Output: "outdated"}, "status")
+	assert.Contains(t, out.String(), "hooks status:\n")
 	assert.Contains(t, out.String(), "~ homebrew (needs update)")
 }
 
 func TestPrintHook_Everything_ShowsOutput(t *testing.T) {
 	p, out, _ := newTestPrinter(Everything)
-	p.PrintHook(hooks.HookResult{Name: "homebrew", ExitCode: 0, Elapsed: 100 * time.Millisecond, Output: "all good\n"}, "pre-link")
+	p.PrintHook(hooks.Result{Name: "homebrew", ExitCode: 0, Elapsed: 100 * time.Millisecond, Output: "all good\n"}, "pre-link")
 	output := out.String()
 	assert.Contains(t, output, "homebrew (0.1s)")
 	assert.Contains(t, output, "    | all good")
@@ -156,7 +159,7 @@ func TestPrintHook_Everything_ShowsOutput(t *testing.T) {
 
 func TestPrintHook_Everything_ShowsMultilineOutput(t *testing.T) {
 	p, out, _ := newTestPrinter(Everything)
-	p.PrintHook(hooks.HookResult{
+	p.PrintHook(hooks.Result{
 		Name:     "brew",
 		ExitCode: 0,
 		Elapsed:  100 * time.Millisecond,
@@ -169,7 +172,7 @@ func TestPrintHook_Everything_ShowsMultilineOutput(t *testing.T) {
 
 func TestPrintHook_Verbose_DoesNotShowOutput(t *testing.T) {
 	p, out, _ := newTestPrinter(Verbose)
-	p.PrintHook(hooks.HookResult{
+	p.PrintHook(hooks.Result{
 		Name:     "brew",
 		ExitCode: 0,
 		Elapsed:  100 * time.Millisecond,
@@ -179,10 +182,11 @@ func TestPrintHook_Verbose_DoesNotShowOutput(t *testing.T) {
 	assert.NotContains(t, output, "should not appear")
 }
 
-func TestPrintHookStatus_Everything_ShowsOutput(t *testing.T) {
+func TestPrintHook_StatusEverything_ShowsOutput(t *testing.T) {
 	p, out, _ := newTestPrinter(Everything)
-	p.PrintHookStatus(hooks.HookStatus{Name: "homebrew.sh", ExitCode: 0, Output: "all good\n"})
+	p.PrintHook(hooks.Result{Name: "homebrew", ExitCode: 0, Output: "all good\n"}, "status")
 	output := out.String()
+	assert.Contains(t, output, "hooks status:\n")
 	assert.Contains(t, output, "homebrew (0.0s)")
 	assert.Contains(t, output, "    | all good")
 }
@@ -201,64 +205,64 @@ func TestHeader_QuietStoresPending(t *testing.T) {
 	assert.Empty(t, out.String())
 }
 
-func TestHeader_ReplacedByNewHeader(t *testing.T) {
-	p, out, _ := newTestPrinter(Quiet)
-	p.Header("first")
-	p.Header("second")
-	p.PrintLink(link.Result{Name: "x", Status: link.StatusMissing, Message: "bad"})
+func TestPrintLink_HeaderOnlyOnce(t *testing.T) {
+	p, out, _ := newTestPrinter(Verbose)
+	p.PrintLink(link.Result{Name: "vimrc", Target: "~/.vimrc", Status: link.StatusLinked})
+	p.PrintLink(link.Result{Name: "bashrc", Target: "~/.bashrc", Status: link.StatusLinked})
 	output := out.String()
-	assert.NotContains(t, output, "first:\n")
-	assert.Contains(t, output, "second:\n")
+	assert.Equal(t, 1, countOccurrences(output, "links:\n"))
 }
 
-func TestNoHeaderFlush_WhenNotSet(t *testing.T) {
+func TestPrintLink_QuietFlushesHeaderOnError(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
 	p.PrintLink(link.Result{Name: "x", Status: link.StatusMissing, Message: "bad"})
-	assert.Equal(t, "  ✗ x (bad)\n", out.String())
+	output := out.String()
+	assert.Contains(t, output, "links:\n")
+	assert.Contains(t, output, "  ✗ x (bad)")
 }
 
 // --- Summary ---
 
 func TestSummary_AllUnchanged(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(3, 3, LinkSummary{Existing: 30}, 2, 2)
-	assert.Equal(t, "✓ dottie · hooks:pre 3 · links 30 · hooks:post 2\n", out.String())
+	p.Summary(3, 3, link.Summary{Existing: 30}, 2, 2)
+	assert.Equal(t, "✓ dottie is done · hooks:pre 3 · links 30 · hooks:post 2\n", out.String())
 }
 
 func TestSummary_WithAdded(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(3, 3, LinkSummary{Existing: 28, Added: 2}, 2, 2)
-	assert.Equal(t, "✓ dottie · hooks:pre 3 · links 28 +2 · hooks:post 2\n", out.String())
+	p.Summary(3, 3, link.Summary{Existing: 28, Added: 2}, 2, 2)
+	assert.Equal(t, "✓ dottie is done · hooks:pre 3 · links 28 +2 · hooks:post 2\n", out.String())
 }
 
 func TestSummary_WithPruned(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(3, 3, LinkSummary{Existing: 30, Pruned: 3}, 2, 2)
-	assert.Equal(t, "✓ dottie · hooks:pre 3 · links 30 -3 · hooks:post 2\n", out.String())
+	p.Summary(3, 3, link.Summary{Existing: 30, Pruned: 3}, 2, 2)
+	assert.Equal(t, "✓ dottie is done · hooks:pre 3 · links 30 -3 · hooks:post 2\n", out.String())
 }
 
 func TestSummary_WithAddedAndPruned(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(3, 3, LinkSummary{Existing: 35, Added: 3, Pruned: 2}, 2, 2)
-	assert.Equal(t, "✓ dottie · hooks:pre 3 · links 35 +3 -2 · hooks:post 2\n", out.String())
+	p.Summary(3, 3, link.Summary{Existing: 35, Added: 3, Pruned: 2}, 2, 2)
+	assert.Equal(t, "✓ dottie is done · hooks:pre 3 · links 35 +3 -2 · hooks:post 2\n", out.String())
 }
 
 func TestSummary_WithErrors(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(2, 3, LinkSummary{Existing: 28, Errors: 2}, 1, 2)
-	assert.Equal(t, "✗ dottie · hooks:pre 2/3 · links 28 !2 · hooks:post 1/2\n", out.String())
+	p.Summary(2, 3, link.Summary{Existing: 28, Errors: 2}, 1, 2)
+	assert.Equal(t, "✗ dottie is done · hooks:pre 2/3 · links 28 !2 · hooks:post 1/2\n", out.String())
 }
 
 func TestSummary_NoHooks(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(0, 0, LinkSummary{Existing: 12}, 0, 0)
-	assert.Equal(t, "✓ dottie · links 12\n", out.String())
+	p.Summary(0, 0, link.Summary{Existing: 12}, 0, 0)
+	assert.Equal(t, "✓ dottie is done · links 12\n", out.String())
 }
 
 func TestSummary_PreOnly(t *testing.T) {
 	p, out, _ := newTestPrinter(Quiet)
-	p.Summary(2, 2, LinkSummary{Existing: 10}, 0, 0)
-	assert.Equal(t, "✓ dottie · hooks:pre 2 · links 10\n", out.String())
+	p.Summary(2, 2, link.Summary{Existing: 10}, 0, 0)
+	assert.Equal(t, "✓ dottie is done · hooks:pre 2 · links 10\n", out.String())
 }
 
 // --- PrintDottieStatus ---

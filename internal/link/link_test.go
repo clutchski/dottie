@@ -854,7 +854,7 @@ func TestPrune_NoManifest(t *testing.T) {
 	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
 	linker := New(cfg)
 
-	results, err := linker.Prune()
+	results, err := linker.FindDangling()
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -881,7 +881,7 @@ func TestPrune_FindsDanglingSymlinks(t *testing.T) {
 	// Delete the source file to make the symlink dangle
 	require.NoError(t, os.Remove(vimrc))
 
-	results, err := linker.Prune()
+	results, err := linker.FindDangling()
 	require.NoError(t, err)
 
 	require.Len(t, results, 1)
@@ -907,7 +907,7 @@ func TestPrune_NoDanglingSymlinks(t *testing.T) {
 	_, err := linker.Link(false, false)
 	require.NoError(t, err)
 
-	results, err := linker.Prune()
+	results, err := linker.FindDangling()
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -935,7 +935,7 @@ func TestPrune_MixedValidAndDangling(t *testing.T) {
 	// Delete only bashrc source to make that symlink dangle
 	require.NoError(t, os.Remove(bashrc))
 
-	results, err := linker.Prune()
+	results, err := linker.FindDangling()
 	require.NoError(t, err)
 
 	require.Len(t, results, 1)
@@ -967,7 +967,7 @@ func TestPrune_NestedDanglingSymlink(t *testing.T) {
 	// Delete source to make symlink dangle
 	require.NoError(t, os.Remove(initVim))
 
-	results, err := linker.Prune()
+	results, err := linker.FindDangling()
 	require.NoError(t, err)
 
 	require.Len(t, results, 1)
@@ -997,7 +997,7 @@ func TestPrune_RemovedSymlinkIsCandidate(t *testing.T) {
 	// Remove the symlink itself (user deleted it manually)
 	require.NoError(t, os.Remove(filepath.Join(targetDir, ".vimrc")))
 
-	results, err := linker.Prune()
+	results, err := linker.FindDangling()
 	require.NoError(t, err)
 
 	// The symlink is gone so it should be reported for manifest cleanup
@@ -1026,7 +1026,7 @@ func TestLink_RecordsManifest(t *testing.T) {
 	require.NoError(t, err)
 
 	manifestPath := filepath.Join(targetDir, ".dottie.links")
-	entries, err := LoadManifest(manifestPath)
+	entries, err := loadManifest(manifestPath)
 	require.NoError(t, err)
 	assert.Equal(t, []string{
 		filepath.Join(targetDir, ".bashrc"),
@@ -1076,4 +1076,87 @@ func TestLink_SetsName(t *testing.T) {
 
 	require.Len(t, results, 1)
 	assert.Equal(t, "vimrc", results[0].Name)
+}
+
+func TestPrune_ReportsRemovalError(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
+
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	_, err := linker.Link(false, false)
+	require.NoError(t, err)
+
+	// Delete source to make symlink dangle
+	require.NoError(t, os.Remove(vimrc))
+
+	// Make the target's parent directory read-only to prevent removal
+	require.NoError(t, os.Chmod(targetDir, 0o555))
+	t.Cleanup(func() {
+		if err := os.Chmod(targetDir, 0o755); err != nil {
+			t.Logf("cleanup chmod: %v", err)
+		}
+	})
+
+	results, err := linker.Prune()
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusDangling, results[0].Status)
+	require.Error(t, results[0].Error, "should report removal error")
+
+	// Manifest should still contain the entry since removal failed
+	require.NoError(t, os.Chmod(targetDir, 0o755))
+	entries, err := loadManifest(filepath.Join(targetDir, ".dottie.links"))
+	require.NoError(t, err)
+	assert.Contains(t, entries, filepath.Join(targetDir, ".vimrc"))
+}
+
+func TestPrune_RemovesDanglingAndUpdatesManifest(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
+
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
+	bashrc := filepath.Join(sourceDir, "bashrc")
+	require.NoError(t, os.WriteFile(bashrc, []byte("export PATH"), 0o644))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	_, err := linker.Link(false, false)
+	require.NoError(t, err)
+
+	// Delete bashrc source to make its symlink dangle
+	require.NoError(t, os.Remove(bashrc))
+
+	results, err := linker.Prune()
+	require.NoError(t, err)
+
+	// Should report the dangling link
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusDangling, results[0].Status)
+	assert.Equal(t, filepath.Join(targetDir, ".bashrc"), results[0].Target)
+
+	// Dangling symlink should be removed
+	assert.False(t, fileExists(filepath.Join(targetDir, ".bashrc")))
+
+	// Manifest should only contain the valid link
+	manifestPath := filepath.Join(targetDir, ".dottie.links")
+	entries, err := loadManifest(manifestPath)
+	require.NoError(t, err)
+	assert.Equal(t, []string{filepath.Join(targetDir, ".vimrc")}, entries)
 }

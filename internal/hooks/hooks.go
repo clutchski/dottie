@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/clutchski/dottie/internal/util"
 )
 
 // EnvVars holds environment variables passed to hook scripts.
@@ -20,6 +22,9 @@ type EnvVars map[string]string
 type Runner struct {
 	hooksDir string
 	env      EnvVars
+
+	mu     sync.RWMutex
+	active map[string]struct{}
 }
 
 // New creates a new hook Runner.
@@ -32,27 +37,104 @@ func New(hooksDir string, env EnvVars) *Runner {
 	}
 }
 
-// HookResult is the outcome of running a single hook.
-type HookResult struct {
+// Result is the outcome of running a single hook.
+type Result struct {
 	Name     string
 	ExitCode int
 	Elapsed  time.Duration
 	Output   string // captured stdout+stderr
 }
 
+// Status represents the interpreted outcome of a hook.
+type Status int
+
+const (
+	StatusOk          Status = iota // exit 0
+	StatusNeedsUpdate               // exit 1 (meaningful for status-phase hooks)
+	StatusFailed                    // exit 2+
+)
+
 // Ok returns true if the hook exited successfully.
-func (r HookResult) Ok() bool { return r.ExitCode == 0 }
+func (r Result) Ok() bool { return r.ExitCode == 0 }
+
+// Status returns the interpreted status based on exit code.
+// For status-phase hooks: Ok, NeedsUpdate, or Failed.
+// For run-phase hooks: callers typically just use Ok().
+func (r Result) Status() Status {
+	if r.ExitCode == 0 {
+		return StatusOk
+	}
+	if r.ExitCode == 1 {
+		return StatusNeedsUpdate
+	}
+	return StatusFailed
+}
+
+// StatusResult holds the collected results of an async status hooks run.
+type StatusResult struct {
+	Results []Result
+	Err     error
+}
+
+// RunStatusAsync runs status hooks in the background and returns a channel
+// that receives the collected results when all hooks complete.
+func (r *Runner) RunStatusAsync() <-chan StatusResult {
+	ch := make(chan StatusResult, 1)
+	go func() {
+		results, err := r.RunPhase("status", false)
+		if err != nil {
+			ch <- StatusResult{Err: err}
+			return
+		}
+		var collected []Result
+		for res := range results {
+			collected = append(collected, res)
+		}
+		ch <- StatusResult{Results: collected}
+	}()
+	return ch
+}
 
 // RunPhase runs all hooks for a phase in parallel, streaming results on a channel.
 // The channel closes when all hooks complete.
-func (r *Runner) RunPhase(phase string, dryRun bool) <-chan HookResult {
-	ch := make(chan HookResult, 16)
+func (r *Runner) RunPhase(phase string, dryRun bool) (<-chan Result, error) {
+	scripts, err := r.List()
+	if err != nil {
+		return nil, err
+	}
+	return r.RunScripts(scripts, phase, dryRun), nil
+}
+
+// Active returns the display names of currently running hooks.
+func (r *Runner) Active() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.active))
+	for name := range r.active {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// RunScripts runs the given hook scripts for a phase in parallel, streaming
+// results on a channel. The channel closes when all hooks complete.
+// All scripts are marked active upfront (before goroutines start) so that
+// callers like the spinner can display them immediately.
+func (r *Runner) RunScripts(scripts []string, phase string, dryRun bool) <-chan Result {
+	ch := make(chan Result, 16)
+
+	r.mu.Lock()
+	r.active = make(map[string]struct{}, len(scripts))
+	for _, s := range scripts {
+		r.active[DisplayName(filepath.Base(s))] = struct{}{}
+	}
+	r.mu.Unlock()
 
 	go func() {
 		defer close(ch)
 
-		scripts, err := r.List()
-		if err != nil || len(scripts) == 0 {
+		if len(scripts) == 0 {
 			return
 		}
 
@@ -61,98 +143,34 @@ func (r *Runner) RunPhase(phase string, dryRun bool) <-chan HookResult {
 			wg.Add(1)
 			go func(path string) {
 				defer wg.Done()
-				ch <- r.runHook(path, phase, dryRun)
+				result := r.runHook(path, phase, dryRun)
+
+				r.mu.Lock()
+				delete(r.active, result.Name)
+				r.mu.Unlock()
+
+				ch <- result
 			}(script)
 		}
 		wg.Wait()
+
+		r.mu.Lock()
+		r.active = nil
+		r.mu.Unlock()
 	}()
 
 	return ch
 }
 
-func (r *Runner) runHook(path, phase string, dryRun bool) HookResult {
-	name := DisplayName(filepath.Base(path))
+func (r *Runner) runHook(path, phase string, dryRun bool) Result {
 	start := time.Now()
-
-	cmd := exec.Command(path, phase)
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	cmd.Env = r.buildEnv("DOTTIE_DRY_RUN", boolToString(dryRun))
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 1
-		}
-	}
-
-	return HookResult{
-		Name:     name,
+	exitCode, output := r.execScript(path, phase, boolToString(dryRun))
+	return Result{
+		Name:     DisplayName(filepath.Base(path)),
 		ExitCode: exitCode,
 		Elapsed:  time.Since(start),
-		Output:   buf.String(),
+		Output:   output,
 	}
-}
-
-// HookStatus represents the status of a single hook.
-type HookStatus struct {
-	Name     string
-	ExitCode int
-	Output   string
-}
-
-// Ok returns true if the hook exited successfully.
-func (s HookStatus) Ok() bool { return s.ExitCode == 0 }
-
-// NeedsUpdate returns true if the hook exited with code 1 (needs update).
-func (s HookStatus) NeedsUpdate() bool { return s.ExitCode == 1 }
-
-// Failed returns true if the hook exited with code 2 or higher.
-func (s HookStatus) Failed() bool { return s.ExitCode > 1 }
-
-// StatusResult holds the results of hook status checks.
-type StatusResult struct {
-	Hooks []HookStatus
-	Err   error
-}
-
-// StartStatusCheck begins running all hooks with "status" phase in parallel.
-// Returns a channel that will receive the results when complete.
-func (r *Runner) StartStatusCheck() <-chan StatusResult {
-	ch := make(chan StatusResult, 1)
-
-	go func() {
-		scripts, err := r.List()
-		if err != nil {
-			ch <- StatusResult{Err: err}
-			return
-		}
-
-		if len(scripts) == 0 {
-			ch <- StatusResult{Hooks: nil}
-			return
-		}
-
-		statuses := make([]HookStatus, len(scripts))
-		var wg sync.WaitGroup
-		for i, script := range scripts {
-			wg.Add(1)
-			go func(idx int, path string) {
-				defer wg.Done()
-				statuses[idx] = r.runStatusScript(path)
-			}(i, script)
-		}
-		wg.Wait()
-
-		ch <- StatusResult{Hooks: statuses}
-	}()
-
-	return ch
 }
 
 // List returns all active hook scripts (executable, non-hidden, non-example),
@@ -186,7 +204,7 @@ func (r *Runner) List() ([]string, error) {
 		}
 
 		path := filepath.Join(r.hooksDir, name)
-		if !isExecutable(path) {
+		if !util.IsExecutable(path) {
 			continue
 		}
 
@@ -197,14 +215,14 @@ func (r *Runner) List() ([]string, error) {
 	return scripts, nil
 }
 
-// runStatusScript runs a hook with "status" phase and returns a HookStatus
-// with the exit code and captured output.
-func (r *Runner) runStatusScript(path string) HookStatus {
-	cmd := exec.Command(path, "status")
+// execScript runs a hook script with the given phase arg and dry-run env value,
+// returning the exit code and captured stdout+stderr.
+func (r *Runner) execScript(path, phase, dryRun string) (int, string) {
+	cmd := exec.Command(path, phase)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	cmd.Env = r.buildEnv("DOTTIE_DRY_RUN", "false")
+	cmd.Env = r.buildEnv("DOTTIE_DRY_RUN", dryRun)
 
 	exitCode := 0
 	if err := cmd.Run(); err != nil {
@@ -215,12 +233,7 @@ func (r *Runner) runStatusScript(path string) HookStatus {
 			exitCode = 1
 		}
 	}
-
-	return HookStatus{
-		Name:     filepath.Base(path),
-		ExitCode: exitCode,
-		Output:   buf.String(),
-	}
+	return exitCode, buf.String()
 }
 
 // buildEnv returns os.Environ() plus the runner's env vars and any extra key=value pairs.
@@ -233,14 +246,6 @@ func (r *Runner) buildEnv(extra ...string) []string {
 		env = append(env, extra[i]+"="+extra[i+1])
 	}
 	return env
-}
-
-func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return info.Mode()&0o111 != 0
 }
 
 func boolToString(b bool) string {

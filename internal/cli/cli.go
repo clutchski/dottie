@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/clutchski/dottie/internal/config"
@@ -13,6 +12,7 @@ import (
 	"github.com/clutchski/dottie/internal/hooks"
 	dotinit "github.com/clutchski/dottie/internal/init"
 	"github.com/clutchski/dottie/internal/link"
+	"github.com/clutchski/dottie/internal/run"
 	"github.com/clutchski/dottie/internal/update"
 )
 
@@ -41,10 +41,6 @@ func Run(args []string) int {
 		return cmdInit(args[1:])
 	case "run":
 		return cmdRun(args[1:])
-	case "prune":
-		return cmdPrune(args[1:])
-	case "hooks":
-		return cmdHooks(args[1:])
 	case "status":
 		return cmdStatus(args[1:])
 	case "update":
@@ -71,8 +67,6 @@ Usage:
 Commands:
   init [dir]     Initialize a new dotfiles repository
   run            Run hooks and symlink dotfiles to home directory
-  prune          Remove dangling symlinks left by deleted dotfiles
-  hooks          Manage hooks (list, run)
   status         Show status of dotfiles
   version        Show version information
   help           Show this help message`)
@@ -114,273 +108,45 @@ func cmdRun(args []string) int {
 		return fatal(err)
 	}
 
+	cfg, err := loadConfig()
+	if err != nil {
+		return fatal(err)
+	}
+
 	p := console.New(verbosity(*verbose, *veryVerbose))
+	p.SetTargetDir(cfg.TargetDir)
 	showProgress := p.IsTTY() && p.Verbosity() == console.Quiet && !*noProgress
-	progress := console.NewProgress(p.Out(), showProgress)
 
-	cfg, err := loadConfig()
-	if err != nil {
-		return fatal(err)
-	}
+	runner := run.New(cfg, nil, *dryRun, *force)
+	events := runner.Start()
+	spinner := run.NewSpinner(p.Out(), showProgress)
 
-	hookRunner := newHookRunner(cfg)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 
-	// Run pre-link hooks
-	preOk, preTotal := runHooks(hookRunner, p, progress, "pre-link", *dryRun)
-
-	// Link dotfiles
-	linker := link.New(cfg)
-	results, err := linker.Link(*dryRun, *force)
-	if err != nil {
-		progress.Stop()
-		return fatal(err)
-	}
-
-	progress.SetMessage(fmt.Sprintf("linking %d files", len(results)))
-
-	// Prune dangling links
-	dangling, err := linker.Prune()
-	if err != nil {
-		progress.Stop()
-		return fatal(err)
-	}
-	pruned := 0
-	if !*dryRun {
-		for _, r := range dangling {
-			if err := os.Remove(r.Target); err != nil && !os.IsNotExist(err) {
-				continue
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				ticker.Stop()
+				spinner.Clear()
+				result := runner.Wait()
+				p.Summary(result.PreOk, result.PreTotal, result.Links,
+					result.PostOk, result.PostTotal)
+				return result.ExitCode
 			}
-			pruned++
-		}
-		if pruned > 0 {
-			// Update manifest to remove pruned entries
-			mp := filepath.Join(cfg.TargetDir, ".dottie.links")
-			manifest, loadErr := link.LoadManifest(mp)
-			if loadErr == nil {
-				removed := make(map[string]bool)
-				for _, r := range dangling {
-					removed[r.Target] = true
-				}
-				var kept []string
-				for _, entry := range manifest {
-					if !removed[entry] {
-						kept = append(kept, entry)
-					}
-				}
-				if saveErr := link.SaveManifest(mp, kept); saveErr != nil {
-					fmt.Fprintf(os.Stderr, "Error updating manifest: %v\n", saveErr)
-				}
+			spinner.Clear()
+			switch e := ev.(type) {
+			case run.HookEvent:
+				p.PrintHook(e.Result, e.Phase)
+			case run.LinkEvent:
+				p.PrintLink(e.Result)
 			}
+			spinner.Render(runner.Phase(), runner.ActiveHooks())
+		case <-ticker.C:
+			spinner.Render(runner.Phase(), runner.ActiveHooks())
 		}
 	}
-
-	var ls console.LinkSummary
-	p.Header("links")
-	for _, r := range results {
-		progress.Clear()
-		p.PrintLink(r)
-		switch r.Status {
-		case link.StatusLinked:
-			ls.Added++
-		case link.StatusAlreadyLinked:
-			ls.Existing++
-		case link.StatusError:
-			ls.Errors++
-		}
-	}
-	for _, r := range dangling {
-		progress.Clear()
-		p.PrintLink(r)
-	}
-	ls.Pruned = len(dangling)
-
-	// Run post-link hooks
-	postOk, postTotal := runHooks(hookRunner, p, progress, "post-link", *dryRun)
-
-	progress.Stop()
-
-	p.Summary(preOk, preTotal, ls, postOk, postTotal)
-
-	if ls.Errors > 0 || preOk < preTotal || postOk < postTotal {
-		return 1
-	}
-	return 0
-}
-
-func cmdPrune(args []string) int {
-	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
-	dryRun := fs.Bool("n", false, "dry-run (display only, no removal)")
-	if err := fs.Parse(args); err != nil {
-		return fatal(err)
-	}
-
-	cfg, err := loadConfig()
-	if err != nil {
-		return fatal(err)
-	}
-
-	linker := link.New(cfg)
-	results, err := linker.Prune()
-	if err != nil {
-		return fatal(err)
-	}
-
-	if len(results) == 0 {
-		fmt.Println("No dangling symlinks found.")
-		return 0
-	}
-
-	for _, r := range results {
-		fmt.Printf("  %s -> %s\n", r.Target, r.Source)
-	}
-
-	if *dryRun {
-		return 0
-	}
-
-	if !confirmPrune(len(results)) {
-		fmt.Println("Aborted.")
-		return 0
-	}
-
-	removed := make(map[string]bool)
-	errCount := 0
-	for _, r := range results {
-		if err := os.Remove(r.Target); err != nil {
-			if !os.IsNotExist(err) {
-				fmt.Fprintf(os.Stderr, "Error removing %s: %v\n", r.Target, err)
-				errCount++
-				continue
-			}
-		}
-		fmt.Printf("Removed %s\n", r.Target)
-		removed[r.Target] = true
-	}
-
-	// Update manifest to remove pruned entries
-	manifestPath := filepath.Join(cfg.TargetDir, ".dottie.links")
-	manifest, err := link.LoadManifest(manifestPath)
-	if err == nil {
-		var kept []string
-		for _, entry := range manifest {
-			if !removed[entry] {
-				kept = append(kept, entry)
-			}
-		}
-		if err := link.SaveManifest(manifestPath, kept); err != nil {
-			fmt.Fprintf(os.Stderr, "Error updating manifest: %v\n", err)
-		}
-	}
-
-	if errCount > 0 {
-		return 1
-	}
-	return 0
-}
-
-func confirmPrune(count int) bool {
-	s := "s"
-	if count == 1 {
-		s = ""
-	}
-	fmt.Printf("Remove %d dangling symlink%s? [y/N] ", count, s)
-	var answer string
-	if _, err := fmt.Scanln(&answer); err != nil {
-		return false
-	}
-	return strings.ToLower(answer) == "y"
-}
-
-func cmdHooks(args []string) int {
-	if len(args) < 1 {
-		printHooksUsage()
-		return 1
-	}
-
-	switch args[0] {
-	case "list":
-		return cmdHooksList()
-	case "run":
-		return cmdHooksRun(args[1:])
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown hooks subcommand: %s\n", args[0])
-		printHooksUsage()
-		return 1
-	}
-}
-
-func printHooksUsage() {
-	fmt.Println(`Usage: dottie hooks <subcommand>
-
-Subcommands:
-  list           List active hooks
-  run <phase>    Run hooks for a phase (pre-link, post-link, status)
-
-Examples:
-  dottie hooks list
-  dottie hooks run pre-link
-  dottie hooks run status`)
-}
-
-func cmdHooksList() int {
-	cfg, err := loadConfig()
-	if err != nil {
-		return fatal(err)
-	}
-
-	hookRunner := newHookRunner(cfg)
-
-	hooksList, err := hookRunner.List()
-	if err != nil {
-		return fatal(err)
-	}
-
-	if len(hooksList) == 0 {
-		fmt.Println("No active hooks found")
-		return 0
-	}
-
-	fmt.Println("hooks:")
-	for _, h := range hooksList {
-		fmt.Printf("  %s\n", filepath.Base(h))
-	}
-
-	return 0
-}
-
-func cmdHooksRun(args []string) int {
-	fs := flag.NewFlagSet("hooks run", flag.ContinueOnError)
-	dryRun := fs.Bool("n", false, "dry-run")
-	veryVerbose := fs.Bool("vv", false, "show all output")
-	if err := fs.Parse(args); err != nil {
-		return fatal(err)
-	}
-
-	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "Error: phase argument required (pre-link, post-link, status)")
-		return 1
-	}
-
-	phase := fs.Arg(0)
-	if phase != "pre-link" && phase != "post-link" && phase != "status" {
-		fmt.Fprintf(os.Stderr, "Error: invalid phase %q (must be pre-link, post-link, or status)\n", phase)
-		return 1
-	}
-
-	cfg, err := loadConfig()
-	if err != nil {
-		return fatal(err)
-	}
-
-	hookRunner := newHookRunner(cfg)
-	p := console.New(verbosity(true, *veryVerbose))
-
-	noop := console.NewProgress(p.Out(), false)
-	ok, total := runHooks(hookRunner, p, noop, phase, *dryRun)
-	if ok < total {
-		return 1
-	}
-	return 0
 }
 
 func cmdStatus(args []string) int {
@@ -391,37 +157,29 @@ func cmdStatus(args []string) int {
 		return fatal(err)
 	}
 
-	p := console.New(verbosity(*verbose, *veryVerbose))
-
 	cfg, err := loadConfig()
 	if err != nil {
 		return fatal(err)
 	}
 
+	p := console.New(verbosity(*verbose, *veryVerbose))
+	p.SetTargetDir(cfg.TargetDir)
+
 	// Start hooks check in background
-	hookRunner := newHookRunner(cfg)
-	hooksChan := hookRunner.StartStatusCheck()
+	hooksChan := newHookRunner(cfg).RunStatusAsync()
 
 	// Start version check in background
 	versionChan := update.GetVersion(version)
 
-	// Check dotfile status
+	// Check dotfile status (includes dangling links from manifest)
 	linker := link.New(cfg)
 	results, err := linker.Check()
 	if err != nil {
 		return fatal(err)
 	}
 
-	// Check for dangling links via manifest
-	dangling, err := linker.Prune()
-	if err != nil {
-		return fatal(err)
-	}
-
 	var lc console.LinkCounts
-	p.Header("links")
 	for _, r := range results {
-		r.Target = formatTargetPath(cfg, r.Target)
 		p.PrintLink(r)
 		switch r.Status {
 		case link.StatusLinked:
@@ -430,14 +188,11 @@ func cmdStatus(args []string) int {
 			lc.Missing++
 		case link.StatusDiff:
 			lc.Diff++
+		case link.StatusDangling:
+			lc.Dangling++
 		case link.StatusError:
 			lc.Error++
 		}
-	}
-	for _, r := range dangling {
-		r.Target = formatTargetPath(cfg, r.Target)
-		p.PrintLink(r)
-		lc.Dangling++
 	}
 
 	// Wait for hooks and print results
@@ -448,17 +203,15 @@ func cmdStatus(args []string) int {
 	}
 
 	var hc console.HookCounts
-	if len(hookResult.Hooks) > 0 {
-		p.Header("hooks")
-		for _, h := range hookResult.Hooks {
-			p.PrintHookStatus(h)
-			if h.Ok() {
-				hc.Ok++
-			} else if h.NeedsUpdate() {
-				hc.Update++
-			} else {
-				hc.Err++
-			}
+	for _, h := range hookResult.Results {
+		p.PrintHook(h, "status")
+		switch h.Status() {
+		case hooks.StatusOk:
+			hc.Ok++
+		case hooks.StatusNeedsUpdate:
+			hc.Update++
+		case hooks.StatusFailed:
+			hc.Err++
 		}
 	}
 
@@ -495,63 +248,11 @@ func cmdStatus(args []string) int {
 	return 0
 }
 
-// formatTargetPath replaces the home directory prefix with ~ for display.
-func formatTargetPath(cfg *config.Config, path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	if cfg.TargetDir == home && strings.HasPrefix(path, home) {
-		return "~" + strings.TrimPrefix(path, home)
-	}
-	return path
-}
-
 func cmdUpdate() int {
 	if err := update.Install(version); err != nil {
 		return fatal(err)
 	}
 	return 0
-}
-
-func runHooks(runner *hooks.Runner, p *console.Printer, prog *console.Progress, phase string, dryRun bool) (ok, total int) {
-	scripts, err := runner.List()
-	if err != nil {
-		scripts = nil
-	}
-	names := hookDisplayNames(scripts)
-	prog.SetTasks(phaseLabel(phase), names)
-
-	p.Header("hooks " + phase)
-	for r := range runner.RunPhase(phase, dryRun) {
-		prog.FinishTask(r.Name)
-		prog.Clear()
-		p.PrintHook(r, phase)
-		total++
-		if r.Ok() {
-			ok++
-		}
-	}
-	return ok, total
-}
-
-func phaseLabel(phase string) string {
-	switch phase {
-	case "pre-link":
-		return "hooks:pre"
-	case "post-link":
-		return "hooks:post"
-	default:
-		return phase
-	}
-}
-
-func hookDisplayNames(scripts []string) []string {
-	names := make([]string, len(scripts))
-	for i, s := range scripts {
-		names[i] = hooks.DisplayName(filepath.Base(s))
-	}
-	return names
 }
 
 func newHookRunner(cfg *config.Config) *hooks.Runner {

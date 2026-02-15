@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// LoadManifest reads the manifest file and returns deduplicated, sorted paths.
+// loadManifest reads the manifest file and returns deduplicated, sorted paths.
 // Returns an empty slice (no error) if the file does not exist.
-func LoadManifest(path string) (paths []string, err error) {
+func loadManifest(path string) (paths []string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -43,8 +43,8 @@ func LoadManifest(path string) (paths []string, err error) {
 	return paths, nil
 }
 
-// SaveManifest writes the given paths to the manifest file, one per line.
-func SaveManifest(path string, targets []string) error {
+// saveManifest writes the given paths to the manifest file, one per line.
+func saveManifest(path string, targets []string) error {
 	content := strings.Join(targets, "\n") + "\n"
 	return os.WriteFile(path, []byte(content), 0o644)
 }

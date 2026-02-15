@@ -57,20 +57,28 @@ type Result struct {
 	Error      error
 }
 
-// linker handles symlinking dotfiles.
-type linker struct {
+// Summary holds link counts for a run summary.
+type Summary struct {
+	Existing int // already linked, no change
+	Added    int // newly linked
+	Pruned   int // orphan/pruned
+	Errors   int // link errors
+}
+
+// Linker handles symlinking dotfiles.
+type Linker struct {
 	cfg *config.Config
 }
 
-// New creates a new linker.
-func New(cfg *config.Config) *linker {
-	return &linker{cfg: cfg}
+// New creates a new Linker.
+func New(cfg *config.Config) *Linker {
+	return &Linker{cfg: cfg}
 }
 
 // Link symlinks all dotfiles from source to target.
 // If dryRun is true, no changes are made.
 // If force is true, existing files are overwritten without backup.
-func (l *linker) Link(dryRun, force bool) ([]Result, error) {
+func (l *Linker) Link(dryRun, force bool) ([]Result, error) {
 	sources, err := l.collectSourcePaths()
 	if err != nil {
 		return nil, err
@@ -95,14 +103,14 @@ func (l *linker) Link(dryRun, force bool) ([]Result, error) {
 }
 
 // manifestPath returns the path to the manifest file.
-func (l *linker) manifestPath() string {
+func (l *Linker) manifestPath() string {
 	return filepath.Join(l.cfg.TargetDir, ".dottie.links")
 }
 
 // recordManifest updates the manifest with targets from the given results.
-func (l *linker) recordManifest(results []Result) error {
+func (l *Linker) recordManifest(results []Result) error {
 	mp := l.manifestPath()
-	existing, err := LoadManifest(mp)
+	existing, err := loadManifest(mp)
 	if err != nil {
 		return err
 	}
@@ -120,11 +128,11 @@ func (l *linker) recordManifest(results []Result) error {
 	}
 
 	sort.Strings(existing)
-	return SaveManifest(mp, existing)
+	return saveManifest(mp, existing)
 }
 
 // Check performs a read-only status check of all dotfiles.
-func (l *linker) Check() ([]Result, error) {
+func (l *Linker) Check() ([]Result, error) {
 	sources, err := l.collectSourcePaths()
 	if err != nil {
 		return nil, err
@@ -153,7 +161,7 @@ func (l *linker) Check() ([]Result, error) {
 	return results, nil
 }
 
-func (l *linker) checkFile(source, target string) Result {
+func (l *Linker) checkFile(source, target string) Result {
 	var r Result
 
 	// Check if target exists
@@ -199,11 +207,10 @@ func (l *linker) checkFile(source, target string) Result {
 	return r
 }
 
-// Prune reads the manifest and returns entries whose symlinks are dangling
-// (target no longer resolves) or already removed. It is read-only and does
-// not remove anything.
-func (l *linker) Prune() ([]Result, error) {
-	targets, err := LoadManifest(l.manifestPath())
+// FindDangling reads the manifest and returns entries whose symlinks are
+// dangling or already removed. It is read-only.
+func (l *Linker) FindDangling() ([]Result, error) {
+	targets, err := loadManifest(l.manifestPath())
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +233,7 @@ func (l *linker) Prune() ([]Result, error) {
 			continue
 		}
 
-		// Symlink exists — check if it's dangling
+		// Symlink exists -- check if it's dangling
 		if _, err := os.Stat(target); err != nil {
 			linkTarget, readErr := os.Readlink(target)
 			if readErr != nil {
@@ -248,8 +255,45 @@ func (l *linker) Prune() ([]Result, error) {
 	return results, nil
 }
 
+// Prune finds dangling symlinks, removes them, and updates the manifest.
+// Results that could not be removed will have their Error field set.
+func (l *Linker) Prune() ([]Result, error) {
+	dangling, err := l.FindDangling()
+	if err != nil || len(dangling) == 0 {
+		return dangling, err
+	}
+
+	removed := make(map[string]bool)
+	for i, d := range dangling {
+		if err := os.Remove(d.Target); err != nil && !os.IsNotExist(err) {
+			dangling[i].Error = err
+			continue
+		}
+		removed[d.Target] = true
+	}
+
+	if len(removed) > 0 {
+		mp := l.manifestPath()
+		manifest, err := loadManifest(mp)
+		if err != nil {
+			return dangling, err
+		}
+		var kept []string
+		for _, entry := range manifest {
+			if !removed[entry] {
+				kept = append(kept, entry)
+			}
+		}
+		if err := saveManifest(mp, kept); err != nil {
+			return dangling, err
+		}
+	}
+
+	return dangling, nil
+}
+
 // collectSourcePaths walks the source directory and collects all file paths.
-func (l *linker) collectSourcePaths() ([]string, error) {
+func (l *Linker) collectSourcePaths() ([]string, error) {
 	sourceDir := l.cfg.GetSourcePath()
 	var sources []string
 
@@ -279,7 +323,7 @@ func (l *linker) collectSourcePaths() ([]string, error) {
 }
 
 // getTargetDirs extracts unique target directories from source paths.
-func (l *linker) getTargetDirs(sourcePaths []string) []string {
+func (l *Linker) getTargetDirs(sourcePaths []string) []string {
 	seen := make(map[string]bool)
 	var dirs []string
 
@@ -314,7 +358,7 @@ func (l *linker) getTargetDirs(sourcePaths []string) []string {
 }
 
 // makeDirs creates directories, replacing any symlinks with real directories.
-func (l *linker) makeDirs(dirs []string) error {
+func (l *Linker) makeDirs(dirs []string) error {
 	for _, dir := range dirs {
 		if util.IsSymlink(dir) {
 			if err := os.Remove(dir); err != nil {
@@ -329,7 +373,7 @@ func (l *linker) makeDirs(dirs []string) error {
 }
 
 // createLinks creates symlinks for all source files.
-func (l *linker) createLinks(sources []string, dryRun, force bool) []Result {
+func (l *Linker) createLinks(sources []string, dryRun, force bool) []Result {
 	sourceDir := l.cfg.GetSourcePath()
 	var results []Result
 
@@ -353,7 +397,7 @@ func (l *linker) createLinks(sources []string, dryRun, force bool) []Result {
 }
 
 // computeTargetPath computes the target path for a file given its relative path.
-func (l *linker) computeTargetPath(relPath string) string {
+func (l *Linker) computeTargetPath(relPath string) string {
 	parts := strings.Split(relPath, string(filepath.Separator))
 
 	// First component gets dot prefix via existing config method
@@ -365,7 +409,7 @@ func (l *linker) computeTargetPath(relPath string) string {
 	return filepath.Join(firstTarget, filepath.Join(parts[1:]...))
 }
 
-func (l *linker) linkFile(source, target string, dryRun, force bool) Result {
+func (l *Linker) linkFile(source, target string, dryRun, force bool) Result {
 	result := Result{
 		Source: source,
 		Target: target,

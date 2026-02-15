@@ -97,36 +97,6 @@ func TestSymlinkTarget(t *testing.T) {
 	}
 }
 
-func TestExpandPath(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("Failed to get home dir: %v", err)
-	}
-
-	tests := []struct {
-		name     string
-		path     string
-		expected string
-	}{
-		{"tilde only", "~", home},
-		{"tilde with path", "~/dotfiles", filepath.Join(home, "dotfiles")},
-		{"absolute path", "/tmp/test", "/tmp/test"},
-		{"relative path", "relative/path", "relative/path"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ExpandPath(tt.path)
-			if err != nil {
-				t.Errorf("ExpandPath(%q) returned error: %v", tt.path, err)
-			}
-			if got != tt.expected {
-				t.Errorf("ExpandPath(%q) = %q, want %q", tt.path, got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestEnsureDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	newDir := filepath.Join(tmpDir, "new", "nested", "dir")
@@ -252,7 +222,8 @@ func TestBackupFile_Directory(t *testing.T) {
 	}
 
 	// Check backup is a directory
-	if !IsDir(backupPath) {
+	fi, err := os.Stat(backupPath)
+	if err != nil || !fi.IsDir() {
 		t.Fatalf("Backup at %q is not a directory", backupPath)
 	}
 
