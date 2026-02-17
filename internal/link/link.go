@@ -158,6 +158,13 @@ func (l *Linker) Check() ([]Result, error) {
 		r.Target = target
 		results = append(results, r)
 	}
+
+	dangling, err := l.FindDangling()
+	if err != nil {
+		return results, err
+	}
+	results = append(results, dangling...)
+
 	return results, nil
 }
 

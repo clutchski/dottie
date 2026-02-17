@@ -842,6 +842,44 @@ func TestCheck_SetsNameAndTarget(t *testing.T) {
 
 // --- Prune tests ---
 
+func TestCheck_IncludesDanglingFromManifest(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "dotfiles")
+	targetDir := filepath.Join(tmpDir, "home")
+	backupDir := filepath.Join(tmpDir, "backup")
+
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
+
+	// Create two source files and link them (creates manifest)
+	vimrc := filepath.Join(sourceDir, "vimrc")
+	require.NoError(t, os.WriteFile(vimrc, []byte("set number"), 0o644))
+	bashrc := filepath.Join(sourceDir, "bashrc")
+	require.NoError(t, os.WriteFile(bashrc, []byte("export PATH"), 0o644))
+
+	cfg := createTestConfig(t, sourceDir, targetDir, backupDir)
+	linker := New(cfg)
+
+	_, err := linker.Link(false, false)
+	require.NoError(t, err)
+
+	// Delete bashrc source to make its symlink dangle
+	require.NoError(t, os.Remove(bashrc))
+
+	results, err := linker.Check()
+	require.NoError(t, err)
+
+	// Should include the live vimrc AND the dangling bashrc
+	statusMap := make(map[Status][]Result)
+	for _, r := range results {
+		statusMap[r.Status] = append(statusMap[r.Status], r)
+	}
+
+	require.Len(t, statusMap[StatusLinked], 1, "vimrc should be linked")
+	require.Len(t, statusMap[StatusDangling], 1, "bashrc should be dangling")
+	assert.Equal(t, filepath.Join(targetDir, ".bashrc"), statusMap[StatusDangling][0].Target)
+}
+
 func TestPrune_NoManifest(t *testing.T) {
 	tmpDir := t.TempDir()
 	sourceDir := filepath.Join(tmpDir, "dotfiles")
