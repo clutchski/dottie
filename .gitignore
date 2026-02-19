@@ -11,5 +11,8 @@ dist/
 # OS
 .DS_Store
 
+# Local environment
+.env
+
 # Claude local settings (keep .claude/settings.json)
 .claude/settings.local.json
