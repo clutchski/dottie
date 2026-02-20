@@ -92,24 +92,12 @@ dottie run -v          # verbose (show all results)
 dottie run -vv         # show all results + hook output
 ```
 
-### `dottie hooks list`
+### `dottie update`
 
-List active hooks (executable files in `hooks/`).
-
-```bash
-dottie hooks list
-```
-
-### `dottie hooks run <phase>`
-
-Run hooks for a specific phase without linking.
+Update dottie to the latest version.
 
 ```bash
-dottie hooks run pre-link     # run pre-link hooks only
-dottie hooks run post-link    # run post-link hooks only
-dottie hooks run status       # run status hooks only
-dottie hooks run pre-link -n  # dry-run
-dottie hooks run status -vv   # show hook output
+dottie update
 ```
 
 ### `dottie status`
