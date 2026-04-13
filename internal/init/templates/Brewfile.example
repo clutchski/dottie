@@ -1,0 +1,10 @@
+# Example Brewfile
+# Copy to Brewfile and add packages:
+#   cp Brewfile.example Brewfile
+# Includes examples for `tap`, `brew`, and `cask`.
+
+# tap "clutchski/tap"
+# brew "dottie"
+# brew "git"
+# brew "mise"
+# cask "iterm2"

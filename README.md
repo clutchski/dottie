@@ -180,9 +180,28 @@ esac
 
 Hidden files (`.foo`) and example files (`*.example.sh`) are skipped.
 
-`dottie init` creates example hooks you can enable by copying:
+`dottie init` creates a basic hook library in `hooks/`:
+- `hook.example.sh` - generic starting point for custom hooks
+- `homebrew.example.sh` - install/check packages from `Brewfile`
+- `mise.example.sh` - install/check runtimes from `mise.toml`
+- `apt.example.sh` - install/check packages from `Aptfile` (Linux)
+- `lib.example.sh` - shared helper functions
+
+Enable hooks by copying them to non-example names:
 ```bash
-cp hooks/homebrew.example.sh hooks/homebrew.sh
+cp hooks/homebrew.example.sh hooks/01-homebrew.sh
+cp hooks/mise.example.sh hooks/02-mise.sh
+# Linux:
+cp hooks/apt.example.sh hooks/01-apt.sh
+```
+
+Status hooks are intentionally strict: if required manifests are missing, they return `exit 1` with a message describing what to create (for example, missing `Brewfile` or `Aptfile`).
+
+Manifest files:
+```bash
+cp Brewfile.example Brewfile
+cp Aptfile.example Aptfile
+# create mise.toml manually (no generated example)
 ```
 
 ## Build from Source

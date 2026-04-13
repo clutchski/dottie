@@ -1,6 +1,7 @@
 package init
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,120 +9,50 @@ import (
 	"strings"
 )
 
-const defaultConfig = `# Dottie configuration
+//go:embed templates/**
+var templateFS embed.FS
 
-# Where dotfiles are stored in this repo
-source_dir: home
+func readTemplate(path string) ([]byte, error) {
+	b, err := templateFS.ReadFile(filepath.Join("templates", path))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read template %q: %w", path, err)
+	}
+	return b, nil
+}
 
-# Where to link them (default: $HOME)
-target_dir: ~
+func writeTemplate(absDir, outPath, templatePath string, perm os.FileMode) error {
+	content, err := readTemplate(templatePath)
+	if err != nil {
+		return err
+	}
+	fullPath := filepath.Join(absDir, outPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return fmt.Errorf("failed to create parent directory for %q: %w", outPath, err)
+	}
+	if err := os.WriteFile(fullPath, content, perm); err != nil {
+		return fmt.Errorf("failed to write %q: %w", outPath, err)
+	}
+	return nil
+}
 
-# Prepend . to filenames when linking
-# e.g., home/vimrc -> ~/.vimrc
-add_dot: true
-
-# Where to store backups of existing files
-backup_dir: ~/.dottie.backup
-
-# What to do on conflict: backup | skip | overwrite
-conflict: backup
-
-# Files/directories to ignore
-ignore:
-  - README.md
-  - LICENSE
-`
-
-const exampleShellrc = `# Example: becomes ~/.shellrc when linked
-# Replace with your actual dotfiles!
-
-alias ll='ls -la'
-`
-
-const exampleEditorrc = `# Example: becomes ~/.editorrc when linked
-# Replace with your actual dotfiles!
-
-indent_size = 4
-`
-
-const exampleStarship = `# Example: becomes ~/.config/starship.toml when linked
-# Shows how to link files into directories that already exist
-
-format = "$directory$git_branch$character"
-`
-
-const hookExampleTemplate = `#!/bin/bash
-# Example hook template
-# Copy this file: cp hooks/hook.example.sh hooks/01-my-hook.sh
-# Then edit to add your logic
-#
-# Phases:
-#   pre-link  - runs before symlinking (install dependencies here)
-#   post-link - runs after symlinking (configure tools here)
-#   status    - exit 0 if ok, exit 1 if needs update, exit 2+ if failed
-
-case "$1" in
-    pre-link)
-        # Example: install a tool if missing
-        # command -v mytool &>/dev/null || install_mytool
-        ;;
-    post-link)
-        # Example: configure something after dotfiles are linked
-        ;;
-    status)
-        # Example: check if tool is installed
-        # command -v mytool &>/dev/null
-        exit 0
-        ;;
-esac
-`
-
-const homebrewExampleTemplate = `#!/bin/bash
-# Homebrew package management hook
-# To enable: cp hooks/homebrew.example.sh hooks/01-homebrew.sh
-BREWFILE="$DOTTIE_ROOT/Brewfile"
-
-case "$1" in
-    pre-link)
-        # Install Homebrew if missing (macOS only)
-        if [[ "$(uname)" == "Darwin" ]] && ! command -v brew &>/dev/null; then
-            echo "Installing Homebrew..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        fi
-
-        # Install packages from Brewfile
-        if [[ -f "$BREWFILE" ]] && command -v brew &>/dev/null; then
-            if [[ "$DOTTIE_DRY_RUN" == "true" ]]; then
-                echo "[dry-run] would run: brew bundle --file=$BREWFILE"
-            else
-                brew bundle check --file="$BREWFILE" &>/dev/null || brew bundle --file="$BREWFILE"
-            fi
-        fi
-        ;;
-    status)
-        # exit 2 = failed (brew not installed)
-        command -v brew &>/dev/null || exit 2
-
-        # exit 1 = needs update (packages missing), exit 0 = ok
-        if [[ -f "$BREWFILE" ]]; then
-            brew bundle check --file="$BREWFILE" &>/dev/null
-            exit $?
-        fi
-        ;;
-esac
-`
-
-const bootstrapScript = `#!/bin/bash
-export DOTFILES_REPO="%s"
-curl -fsSL https://raw.githubusercontent.com/clutchski/dottie/main/scripts/bootstrap.sh | bash
-`
-
-const readmeTemplate = `# %s
-
-` + "```" + `bash
-curl -fsSL %s/main/scripts/bootstrap.sh | bash
-` + "```" + `
-`
+func writeTemplateRendered(absDir, outPath, templatePath string, perm os.FileMode, repl map[string]string) error {
+	content, err := readTemplate(templatePath)
+	if err != nil {
+		return err
+	}
+	rendered := string(content)
+	for k, v := range repl {
+		rendered = strings.ReplaceAll(rendered, k, v)
+	}
+	fullPath := filepath.Join(absDir, outPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return fmt.Errorf("failed to create parent directory for %q: %w", outPath, err)
+	}
+	if err := os.WriteFile(fullPath, []byte(rendered), perm); err != nil {
+		return fmt.Errorf("failed to write %q: %w", outPath, err)
+	}
+	return nil
+}
 
 // getGitRemoteURL tries to get the git remote URL for the current directory.
 func getGitRemoteURL(dir string) string {
@@ -169,58 +100,46 @@ func Init(dir string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// Create dottie.yaml
-	if err := os.WriteFile(configPath, []byte(defaultConfig), 0o644); err != nil {
-		return fmt.Errorf("failed to create config file: %w", err)
+	// Core scaffolding
+	if err := writeTemplate(absDir, "dottie.yaml", "dottie.yaml", 0o644); err != nil {
+		return err
+	}
+	if err := writeTemplate(absDir, "home/shellrc", "home/shellrc", 0o644); err != nil {
+		return err
+	}
+	if err := writeTemplate(absDir, "home/editorrc", "home/editorrc", 0o644); err != nil {
+		return err
+	}
+	if err := writeTemplate(absDir, "home/config/starship.toml", "home/config/starship.toml", 0o644); err != nil {
+		return err
 	}
 
-	// Create home directory with examples
-	homePath := filepath.Join(absDir, "home")
-	if err := os.MkdirAll(homePath, 0o755); err != nil {
-		return fmt.Errorf("failed to create home directory: %w", err)
+	// Hook library templates
+	if err := writeTemplate(absDir, "hooks/hook.example.sh", "hooks/hook.example.sh", 0o755); err != nil {
+		return err
+	}
+	if err := writeTemplate(absDir, "hooks/homebrew.example.sh", "hooks/homebrew.example.sh", 0o755); err != nil {
+		return err
+	}
+	if err := writeTemplate(absDir, "hooks/mise.example.sh", "hooks/mise.example.sh", 0o755); err != nil {
+		return err
+	}
+	if err := writeTemplate(absDir, "hooks/apt.example.sh", "hooks/apt.example.sh", 0o755); err != nil {
+		return err
+	}
+	if err := writeTemplate(absDir, "hooks/lib.example.sh", "hooks/lib.example.sh", 0o644); err != nil {
+		return err
+	}
+	if err := writeTemplate(absDir, "hooks/README.md", "hooks/README.md", 0o644); err != nil {
+		return err
 	}
 
-	shellrcPath := filepath.Join(homePath, "shellrc")
-	if err := os.WriteFile(shellrcPath, []byte(exampleShellrc), 0o644); err != nil {
-		return fmt.Errorf("failed to create example shellrc: %w", err)
+	// Optional manifest examples
+	if err := writeTemplate(absDir, "Brewfile.example", "Brewfile.example", 0o644); err != nil {
+		return err
 	}
-
-	editorrcPath := filepath.Join(homePath, "editorrc")
-	if err := os.WriteFile(editorrcPath, []byte(exampleEditorrc), 0o644); err != nil {
-		return fmt.Errorf("failed to create example editorrc: %w", err)
-	}
-
-	// Create config directory with example (demonstrates linking into existing directories)
-	homeConfigPath := filepath.Join(homePath, "config")
-	if err := os.MkdirAll(homeConfigPath, 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-
-	starshipPath := filepath.Join(homeConfigPath, "starship.toml")
-	if err := os.WriteFile(starshipPath, []byte(exampleStarship), 0o644); err != nil {
-		return fmt.Errorf("failed to create example starship.toml: %w", err)
-	}
-
-	// Create hooks directory with example hooks
-	hooksPath := filepath.Join(absDir, "hooks")
-	if err := os.MkdirAll(hooksPath, 0o755); err != nil {
-		return fmt.Errorf("failed to create hooks directory: %w", err)
-	}
-
-	hookExamplePath := filepath.Join(hooksPath, "hook.example.sh")
-	if err := os.WriteFile(hookExamplePath, []byte(hookExampleTemplate), 0o755); err != nil {
-		return fmt.Errorf("failed to create hook.example.sh: %w", err)
-	}
-
-	homebrewExamplePath := filepath.Join(hooksPath, "homebrew.example.sh")
-	if err := os.WriteFile(homebrewExamplePath, []byte(homebrewExampleTemplate), 0o755); err != nil {
-		return fmt.Errorf("failed to create homebrew.example.sh: %w", err)
-	}
-
-	// Create scripts directory with bootstrap.sh
-	scriptsPath := filepath.Join(absDir, "scripts")
-	if err := os.MkdirAll(scriptsPath, 0o755); err != nil {
-		return fmt.Errorf("failed to create scripts directory: %w", err)
+	if err := writeTemplate(absDir, "Aptfile.example", "Aptfile.example", 0o644); err != nil {
+		return err
 	}
 
 	repoName := filepath.Base(absDir)
@@ -228,19 +147,19 @@ func Init(dir string) error {
 	if repoURL == "" {
 		repoURL = "https://github.com/YOUR_USERNAME/" + repoName
 	}
+	rawURL := strings.Replace(repoURL, "github.com", "raw.githubusercontent.com", 1)
 
-	bootstrap := fmt.Sprintf(bootstrapScript, repoURL)
-	bootstrapPath := filepath.Join(scriptsPath, "bootstrap.sh")
-	if err := os.WriteFile(bootstrapPath, []byte(bootstrap), 0o755); err != nil {
-		return fmt.Errorf("failed to create bootstrap.sh: %w", err)
+	if err := writeTemplateRendered(absDir, "scripts/bootstrap.sh", "scripts/bootstrap.sh.tmpl", 0o755, map[string]string{
+		"__REPO_URL__": repoURL,
+	}); err != nil {
+		return err
 	}
 
-	// Create README with raw URL for bootstrap
-	rawURL := strings.Replace(repoURL, "github.com", "raw.githubusercontent.com", 1)
-	readme := fmt.Sprintf(readmeTemplate, repoName, rawURL)
-	readmePath := filepath.Join(absDir, "README.md")
-	if err := os.WriteFile(readmePath, []byte(readme), 0o644); err != nil {
-		return fmt.Errorf("failed to create README.md: %w", err)
+	if err := writeTemplateRendered(absDir, "README.md", "README.md.tmpl", 0o644, map[string]string{
+		"__REPO_NAME__": repoName,
+		"__RAW_URL__":   rawURL,
+	}); err != nil {
+		return err
 	}
 
 	return nil

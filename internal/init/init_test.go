@@ -54,9 +54,13 @@ func TestInit_CreatesExampleHooks(t *testing.T) {
 	err := Init(targetDir)
 	require.NoError(t, err)
 
-	// Check example hooks exist
+	// Check example hook library exists
 	assert.FileExists(t, filepath.Join(targetDir, "hooks", "hook.example.sh"))
 	assert.FileExists(t, filepath.Join(targetDir, "hooks", "homebrew.example.sh"))
+	assert.FileExists(t, filepath.Join(targetDir, "hooks", "mise.example.sh"))
+	assert.FileExists(t, filepath.Join(targetDir, "hooks", "apt.example.sh"))
+	assert.FileExists(t, filepath.Join(targetDir, "hooks", "lib.example.sh"))
+	assert.FileExists(t, filepath.Join(targetDir, "hooks", "README.md"))
 
 	// Check hook.example.sh content
 	hookContent, err := os.ReadFile(filepath.Join(targetDir, "hooks", "hook.example.sh"))
@@ -72,6 +76,17 @@ func TestInit_CreatesExampleHooks(t *testing.T) {
 	assert.Contains(t, string(brewContent), "#!/bin/bash")
 	assert.Contains(t, string(brewContent), "DOTTIE_ROOT")
 	assert.Contains(t, string(brewContent), "brew bundle")
+	assert.Contains(t, string(brewContent), "missing Brewfile")
+
+	miseContent, err := os.ReadFile(filepath.Join(targetDir, "hooks", "mise.example.sh"))
+	require.NoError(t, err)
+	assert.Contains(t, string(miseContent), "#!/bin/bash")
+	assert.Contains(t, string(miseContent), "missing mise.toml")
+
+	aptContent, err := os.ReadFile(filepath.Join(targetDir, "hooks", "apt.example.sh"))
+	require.NoError(t, err)
+	assert.Contains(t, string(aptContent), "#!/bin/bash")
+	assert.Contains(t, string(aptContent), "missing Aptfile")
 
 	// Check example hooks are executable
 	hookInfo, err := os.Stat(filepath.Join(targetDir, "hooks", "hook.example.sh"))
@@ -81,6 +96,14 @@ func TestInit_CreatesExampleHooks(t *testing.T) {
 	brewInfo, err := os.Stat(filepath.Join(targetDir, "hooks", "homebrew.example.sh"))
 	require.NoError(t, err)
 	assert.NotEqual(t, fs.FileMode(0), brewInfo.Mode()&0o111, "homebrew.example.sh should be executable")
+
+	miseInfo, err := os.Stat(filepath.Join(targetDir, "hooks", "mise.example.sh"))
+	require.NoError(t, err)
+	assert.NotEqual(t, fs.FileMode(0), miseInfo.Mode()&0o111, "mise.example.sh should be executable")
+
+	aptInfo, err := os.Stat(filepath.Join(targetDir, "hooks", "apt.example.sh"))
+	require.NoError(t, err)
+	assert.NotEqual(t, fs.FileMode(0), aptInfo.Mode()&0o111, "apt.example.sh should be executable")
 }
 
 func TestInit_CreatesExampleFiles(t *testing.T) {
@@ -99,6 +122,17 @@ func TestInit_CreatesExampleFiles(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(targetDir, "README.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "bootstrap.sh")
+
+	// Check package manifest examples
+	assert.FileExists(t, filepath.Join(targetDir, "Brewfile.example"))
+	assert.FileExists(t, filepath.Join(targetDir, "Aptfile.example"))
+	assert.NoFileExists(t, filepath.Join(targetDir, "mise.toml.example"))
+
+	brewfileContent, err := os.ReadFile(filepath.Join(targetDir, "Brewfile.example"))
+	require.NoError(t, err)
+	assert.Contains(t, string(brewfileContent), `# tap "clutchski/tap"`)
+	assert.Contains(t, string(brewfileContent), `# brew "dottie"`)
+	assert.Contains(t, string(brewfileContent), `# cask "iterm2"`)
 }
 
 func TestInit_CreatesConfigDirectory(t *testing.T) {

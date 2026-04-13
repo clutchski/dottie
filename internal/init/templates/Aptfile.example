@@ -1,0 +1,6 @@
+# Example Aptfile (Debian/Ubuntu)
+# Copy to Aptfile and add packages:
+#   cp Aptfile.example Aptfile
+
+git
+curl

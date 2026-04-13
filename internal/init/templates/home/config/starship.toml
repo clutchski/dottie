@@ -1,0 +1,4 @@
+# Example: becomes ~/.config/starship.toml when linked
+# Shows how to link files into directories that already exist
+
+format = "$directory$git_branch$character"
