@@ -25,7 +25,7 @@ This auto-detects your OS and architecture and installs the latest release to `~
 Create a git repo to store your configuration files:
 
 ```bash
-mkdir ~/dotfiles && cd ~/dotfiles
+mkdir ~/.dotfiles && cd ~/.dotfiles
 git init
 dottie init
 git add
@@ -39,7 +39,7 @@ This creates the repo structure: `home/` for dotfiles, `hooks/` for scripts, and
 Dotfiles are configuration files for your tools (shell, editor, git, etc.). Copy them into `home/` without the leading dot:
 
 ```bash
-cp ~/.zshrc ~/dotfiles/home/zshrc
+cp ~/.zshrc ~/.dotfiles/home/zshrc
 ```
 
 ### 3. Add a Hook (Optional)
@@ -58,9 +58,9 @@ Edit it to run in `pre-link` (before symlinking), `post-link` (after), or `statu
 dottie run
 ```
 
-Run from any folder by keeping your repo at `~/.dotfiles` or setting `DOTFILES_DIR` to its path. `run` and `status` use `DOTFILES_DIR` when set, otherwise the current directory if it is a dotfiles repo, then `~/.dotfiles`.
+Run it from any folder. `run` and `status` look for your repo in `DOTFILES_DIR` if set, otherwise the current directory if it is a dotfiles repo, otherwise `~/.dotfiles` (where the Quick Start puts it).
 
-This runs your hooks, then creates symlinks (e.g., `~/.zshrc` -> `~/dotfiles/home/zshrc`).
+This runs your hooks, then creates symlinks (e.g., `~/.zshrc` -> `~/.dotfiles/home/zshrc`).
 
 Use `dottie status` to check what's linked.
 
