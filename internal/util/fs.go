@@ -54,8 +54,12 @@ func BackupFile(src, backupDir string) (string, error) {
 	// Create backup filename with timestamp
 	base := filepath.Base(src)
 	timestamp := time.Now().Format("20060102-150405")
-	backupName := fmt.Sprintf("%s.%s", base, timestamp)
-	backupPath := filepath.Join(backupDir, backupName)
+	backupPath := filepath.Join(backupDir, fmt.Sprintf("%s.%s", base, timestamp))
+	// Files with the same basename can be backed up within the same second;
+	// never overwrite an existing backup.
+	for i := 1; pathTaken(backupPath); i++ {
+		backupPath = filepath.Join(backupDir, fmt.Sprintf("%s.%s.%d", base, timestamp, i))
+	}
 
 	// If src is a symlink, preserve it as a symlink
 	if IsSymlink(src) {
@@ -173,4 +177,10 @@ func IsExecutable(path string) bool {
 		return false
 	}
 	return info.Mode()&0o111 != 0
+}
+
+// pathTaken reports whether anything (including a dangling symlink) exists at path.
+func pathTaken(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }

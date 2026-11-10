@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestFileExists(t *testing.T) {
@@ -248,5 +250,26 @@ func TestBackupFile_Directory(t *testing.T) {
 	}
 	if backupLinkTarget != linkTarget {
 		t.Errorf("Backed up symlink target = %q, want %q", backupLinkTarget, linkTarget)
+	}
+}
+
+func TestBackupFile_SameBasenameNoCollision(t *testing.T) {
+	tmpDir := t.TempDir()
+	backupDir := filepath.Join(tmpDir, "backups")
+
+	seen := map[string]string{}
+	for _, dir := range []string{"a", "b", "c"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, dir), 0o755))
+		src := filepath.Join(tmpDir, dir, "config")
+		require.NoError(t, os.WriteFile(src, []byte(dir), 0o644))
+		backupPath, err := BackupFile(src, backupDir)
+		require.NoError(t, err)
+		require.NotContains(t, seen, backupPath)
+		seen[backupPath] = dir
+	}
+	for p, want := range seen {
+		got, err := os.ReadFile(p)
+		require.NoError(t, err)
+		require.Equal(t, want, string(got))
 	}
 }
