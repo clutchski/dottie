@@ -83,5 +83,5 @@ dottie run
 echo ""
 echo "    Done. Your dotfiles are ready."
 echo ""
-echo "    Next time: cd $DOTFILES_DIR && dottie run"
+echo "    Next time: DOTFILES_DIR=\"$DOTFILES_DIR\" dottie run"
 echo ""

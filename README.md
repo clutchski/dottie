@@ -58,6 +58,8 @@ Edit it to run in `pre-link` (before symlinking), `post-link` (after), or `statu
 dottie run
 ```
 
+Run from any folder by keeping your repo at `~/.dotfiles` or setting `DOTFILES_DIR` to its path. `run` and `status` use `DOTFILES_DIR` when set, otherwise the current directory if it is a dotfiles repo, then `~/.dotfiles`.
+
 This runs your hooks, then creates symlinks (e.g., `~/.zshrc` -> `~/dotfiles/home/zshrc`).
 
 Use `dottie status` to check what's linked.
