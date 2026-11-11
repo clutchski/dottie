@@ -1,7 +1,6 @@
 package run
 
 import (
-	"os"
 	"sync"
 
 	"github.com/clutchski/dottie/internal/config"
@@ -66,12 +65,8 @@ type Runner struct {
 // New creates a new Runner.
 func New(cfg *config.Config, hr *hooks.Runner, dryRun, force bool) *Runner {
 	if hr == nil {
-		cwd, err := os.Getwd()
-		if err != nil {
-			cwd = "."
-		}
 		hr = hooks.New(cfg.GetHooksPath(), hooks.EnvVars{
-			"DOTTIE_ROOT": cwd,
+			"DOTTIE_ROOT": cfg.RepoRoot(),
 			"DOTTIE_HOME": cfg.GetTargetDir(),
 		})
 	}

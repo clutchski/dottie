@@ -256,12 +256,8 @@ func cmdUpdate() int {
 }
 
 func newHookRunner(cfg *config.Config) *hooks.Runner {
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "."
-	}
 	return hooks.New(cfg.GetHooksPath(), hooks.EnvVars{
-		"DOTTIE_ROOT": cwd,
+		"DOTTIE_ROOT": cfg.RepoRoot(),
 		"DOTTIE_HOME": cfg.GetTargetDir(),
 	})
 }
@@ -282,14 +278,30 @@ func fatal(err error) int {
 }
 
 func loadConfig() (*config.Config, error) {
-	cwd, err := os.Getwd()
+	root := os.Getenv("DOTFILES_DIR")
+	if root == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		if config.IsDottieDir(cwd) {
+			root = cwd
+		} else {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, err
+			}
+			root = filepath.Join(home, ".dotfiles")
+		}
+	}
+
+	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
-
-	if !config.IsDottieDir(cwd) {
-		return nil, fmt.Errorf("not a dottie directory; run 'dottie init' to create one")
+	if !config.IsDottieDir(root) {
+		return nil, fmt.Errorf("not a dottie directory: %s; set DOTFILES_DIR or run 'dottie init' to create one", root)
 	}
 
-	return config.Load(cwd)
+	return config.Load(root)
 }
